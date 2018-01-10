@@ -1,3 +1,5 @@
+##### Begin C++ gitignore #####
+
 # Prerequisites
 *.d
 
@@ -31,17 +33,57 @@
 *.out
 *.app
 
-# Vim swap
+##### Begin Java gitignore #####
+
+# Compiled class file
+*.class
+
+# Log file
+*.log
+
+# BlueJ files
+*.ctxt
+
+# Mobile Tools for Java (J2ME)
+.mtj.tmp/
+
+# Package Files #
+*.jar
+*.war
+*.ear
+*.zip
+*.tar.gz
+*.rar
+
+# virtual machine crash logs, see http://www.java.com/en/download/help/error_hotspot.xml
+hs_err_pid*
+
+##### Begin vim gitignore #####
+
+# Swap
 [._]*.s[a-v][a-z]
 [._]*.sw[a-p]
 [._]s[a-v][a-z]
 [._]sw[a-p]
 
-# Vim session
+# Session
 Session.vim
 
-# Vim temporary
+# Temporary
 .netrwhist
 *~
-# Vim auto-generated tag files
+
+# Auto-generated tag files
 tags
+
+##### Begin battlecode scaffolding gitignore #####
+
+# Scaffolding files
+LICENSE
+run.bat
+run.sh
+
+# Example funcs players
+examplefuncsplayer-c
+examplefuncsplayer-java
+examplefuncsplayer-python
