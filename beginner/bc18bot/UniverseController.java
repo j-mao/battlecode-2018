@@ -25,6 +25,10 @@ public class UniverseController
 	// there are 9 in total: 8 + center
 	static final Direction[] directions = Direction.values();
 
+	// map of the the planets
+	static PlanetMap earthMap;
+	static PlanetMap marsMap;
+
 	public static void playGame()
 	{
 		// initialise
@@ -32,13 +36,15 @@ public class UniverseController
 		rand = new Random();
 		Planet myPlanet = gc.planet();
 		roundNum = 1;
+		earthMap = gc.startingMap(Planet.Earth);
+		marsMap = gc.startingMap(Planet.Mars);
 
 		// run game
 		while (true)
 		{
+			System.out.printf("Karbonite: %d\n", gc.karbonite());
 			try
 			{
-				System.out.printf("Karbonite: %d\n", gc.karbonite());
 				if (myPlanet == Planet.Earth)
 				{
 					EarthController.runTurn();
