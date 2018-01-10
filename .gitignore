@@ -76,7 +76,7 @@ Session.vim
 # Auto-generated tag files
 tags
 
-##### Begin battlecode scaffolding gitignore #####
+##### Begin battlecode gitignore #####
 
 # Scaffolding files
 LICENSE
@@ -87,3 +87,6 @@ run.sh
 examplefuncsplayer-c
 examplefuncsplayer-java
 examplefuncsplayer-python
+
+# Replay files
+*.bc18
