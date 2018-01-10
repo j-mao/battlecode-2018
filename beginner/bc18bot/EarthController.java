@@ -11,6 +11,7 @@ import bc18bot.UniverseController;
 
 public class EarthController extends UniverseController
 {
+
 	public static void runTurn() throws Exception
 	{
 		VecUnit units = gc.myUnits();
@@ -24,30 +25,12 @@ public class EarthController extends UniverseController
 			{
 				continue; // NOTE: this may not be necessary, but who knows what gc.myUnits will return
 			}
+
 			MapLocation curLoc = unit.location().mapLocation();
 
 			// can I farm karbonite?
-			if (unit.unitType() == UnitType.Worker)
-			{
-				long bestKarbonite = 0;
-				Direction bestFarm = null;
-				for (Direction d: directions)
-				{
-					if (gc.canHarvest(unitId, d))
-					{
-						long altKarbonite = gc.karboniteAt(curLoc.add(d));
-						if (altKarbonite > bestKarbonite)
-						{
-							bestKarbonite = altKarbonite;
-							bestFarm = d;
-						}
-					}
-				}
-				if (bestKarbonite > 0)
-				{
-					gc.harvest(unitId, bestFarm);
-					continue;
-				}
+			if (unit.unitType() == UnitType.Worker) {
+				tryHarvest(unitId);
 			}
 
 			// move randomly if possible
@@ -62,6 +45,38 @@ public class EarthController extends UniverseController
 					}
 				}
 			}
+		}
+	}
+
+	public static boolean tryHarvest (int unitId) throws Exception {
+		//possibly slow performance
+		Unit unit = gc.unit(unitId);
+		MapLocation curLoc = unit.location().mapLocation();
+
+		if (unit.unitType() != UnitType.Worker) {
+			throw new Exception("Non-worker tryHarvest() call");
+		}
+
+		long bestKarbonite = 0;
+		Direction bestFarm = null;
+		for (Direction d: directions)
+		{
+			if (gc.canHarvest(unitId, d))
+			{
+				long altKarbonite = gc.karboniteAt(curLoc.add(d));
+				if (altKarbonite > bestKarbonite)
+				{
+					bestKarbonite = altKarbonite;
+					bestFarm = d;
+				}
+			}
+		}
+		
+		if (bestKarbonite > 0) {
+			gc.harvest(unitId, bestFarm);
+			return true;
+		} else {
+			return false;
 		}
 	}
 }

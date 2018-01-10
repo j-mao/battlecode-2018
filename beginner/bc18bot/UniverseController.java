@@ -38,6 +38,7 @@ public class UniverseController
 		{
 			try
 			{
+				System.out.printf("Karbonite: %d\n", gc.karbonite());
 				if (myPlanet == Planet.Earth)
 				{
 					EarthController.runTurn();
@@ -62,6 +63,7 @@ public class UniverseController
 			// stuff to do at end of turn
 			gc.nextTurn();
 			roundNum += 1;
+			System.out.flush();
 		}
 	}
 }
