@@ -62,6 +62,7 @@ public class UniverseController
 		// run game
 		while (true)
 		{
+			System.out.printf("Karbonite: %d\n", gc.karbonite());
 			try
 			{
 				// stuff to do at start of turn
