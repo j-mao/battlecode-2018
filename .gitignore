@@ -81,7 +81,7 @@ tags
 # Scaffolding files
 LICENSE
 run.bat
-run.sh
+/run.sh
 
 # Example funcs players
 examplefuncsplayer-c
