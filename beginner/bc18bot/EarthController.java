@@ -48,19 +48,6 @@ public class EarthController extends UniverseController
 					continue;
 				}
 			}
-
-			// move randomly if possible
-			if (gc.isMoveReady(unitId))
-			{
-				for (Direction d: directions)
-				{
-					if (gc.canMove(unitId, d))
-					{
-						gc.moveRobot(unitId, d);
-						break;
-					}
-				}
-			}
 		}
 	}
 
@@ -87,9 +74,12 @@ public class EarthController extends UniverseController
 				}
 			}
 		}
-		
+
 		if (bestKarbonite > 0) {
+			System.out.printf("Unit ID %d harvested %d\n", unitId, bestKarbonite);
+			System.out.printf("Before: %d\n", gc.karbonite());
 			gc.harvest(unitId, bestFarm);
+			System.out.printf("After: %d\n", gc.karbonite());
 			return true;
 		} else {
 			return false;
@@ -194,5 +184,44 @@ public class EarthController extends UniverseController
 			return true;
 		}
 		return false;
+  }
+  
+	public static boolean tryMoveForFood (int unitId) throws Exception {
+		if (!gc.isMoveReady(unitId)) {
+			return false;
+		}
+
+		Unit unit = gc.unit(unitId);
+		MapLocation curLoc = unit.location().mapLocation();
+
+
+		long bestKarbonite = 0;
+		Direction bestMove = null;
+
+		for (Direction d: directions) {
+			if (gc.canMove(unitId, d)) {
+				long altKarbonite = 0;
+
+				for (Direction e : directions) {
+					MapLocation tmpLook = curLoc.add(d).add(e);
+
+					if (earthMap.onMap(tmpLook)) {
+						altKarbonite += gc.karboniteAt(tmpLook);
+					}
+				}
+
+				if (altKarbonite > bestKarbonite) {
+					bestKarbonite = altKarbonite;
+					bestMove = d;
+				}
+			}
+		}
+
+		if (bestMove == null) {
+			return false;
+		}
+
+		gc.moveRobot(unitId, bestMove);
+		return true;
 	}
 }
