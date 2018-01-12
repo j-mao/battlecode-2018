@@ -28,7 +28,7 @@ public class EarthController extends UniverseController
 
 		if (roundNum == 1)
 		{
-			//gc.queueResearch(UnitType.Rocket);
+			gc.queueResearch(UnitType.Rocket);
 			VecUnit initialUnits = EarthMap.getInitial_units();
 			for (long i = 0;i < initialUnits.size();i++) if (initialUnits.get(i).team() == enemyTeam)
 			{
@@ -114,6 +114,7 @@ public class EarthController extends UniverseController
 				}
 			}
 		}
+
 		for (int i = 0;i < numunits;i++)
 		{
 			if (units.get(i).unitType() == UnitType.Factory && units.get(i).structureIsBuilt() > 0) {
@@ -121,11 +122,18 @@ public class EarthController extends UniverseController
 				tryProduceRobot(units.get(i).id());
 			}
 		}
+		getUnitSets();
+
 		for (int i = 0;i < numunits;i++)
 		{
 			if (units.get(i).unitType() == UnitType.Rocket && units.get(i).structureIsBuilt() > 0) {
 				tryToLoadRocket(units.get(i).id());
-				if (units.get(i).structureGarrison().size() > 0) {
+				// should I take off?
+				if (units.get(i).health() <= 70 || // in danger of being destroyed
+					(gc.orbitPattern().duration(roundNum)+roundNum <= gc.orbitPattern().duration(roundNum+1)+roundNum+1 && // not worth waiting any more
+					(units.get(i).structureGarrison().size() == units.get(i).structureMaxCapacity() || // full
+					roundNum >= 749))) // about to flood
+				{
 					MapLocation where;
 					do
 						where = new MapLocation(Planet.Mars, (int)(Math.abs(rand.nextInt())%MarsMap.getWidth()), (int)(Math.abs(rand.nextInt())%MarsMap.getHeight()));
@@ -134,8 +142,8 @@ public class EarthController extends UniverseController
 				}
 			}
 		}
-		units = gc.myUnits();
-		numunits = (int)units.size();
+		getUnitSets();
+
 		boolean notYetReplicated = true;
 		for (int i = 0;i < numunits;i++)
 		{

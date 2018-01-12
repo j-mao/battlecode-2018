@@ -291,8 +291,8 @@ public class UniverseController
 		Unit unit = gc.unit(unitId);
 		MapLocation curLoc = unit.location().mapLocation();
 
-		if (unit.unitType() != UnitType.Factory) {
-			throw new Exception("Non-factory tryToUnload() call");
+		if (unit.unitType() != UnitType.Factory && unit.unitType() != UnitType.Rocket) {
+			throw new Exception("Non-structure tryToUnload() call");
 		}
 
 		if (unit.structureGarrison().size() == 0)
