@@ -82,6 +82,8 @@ tags
 LICENSE
 run.bat
 /run.sh
+run_nodocker.bat
+run_nodocker.sh
 
 # Example funcs players
 examplefuncsplayer-c
