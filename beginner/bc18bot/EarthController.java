@@ -30,9 +30,24 @@ public class EarthController extends UniverseController
 
 			MapLocation curLoc = unit.location().mapLocation();
 
+			//if (unit.unitType() == UnitType.Factory && unit.structureIsBuilt() == 1)
+			if (unit.unitType() == UnitType.Factory)
+			{
+				if (tryToUnload(unitId)) {
+					continue;
+				}
+				if (tryProduceRobot(unitId)) {
+					continue;
+				}
+			}
+
 			if (unit.unitType() == UnitType.Worker) {
 				// can I farm karbonite?
 				if (tryHarvest(unitId)) {
+					continue;
+				}
+				// can I repair an existing blueprint?
+				if (tryRepairBlueprint(unitId)) {
 					continue;
 				}
 				// can I build an existing blueprint? [or walk towards one]
@@ -43,9 +58,22 @@ public class EarthController extends UniverseController
 				if (tryReplicate(unitId)) {
 					continue;
 				}
-				// can I lay a blueprint?
-				if (tryToBlueprint(unitId)) {
-					continue;
+				// should && can I lay a blueprint?
+				if ((numFactories+numFactoryBlueprints)*8 <= numRangers)
+				{
+					if (tryToBlueprint(unitId)) {
+						continue;
+					}
+				}
+			}
+
+			if (unit.unitType() == UnitType.Knight || unit.unitType() == UnitType.Ranger || unit.unitType() == UnitType.Mage)
+			{
+				// attack
+				if (gc.isAttackReady(unitId)) {
+					if (tryAttack(unitId)) {
+						continue;
+					}
 				}
 			}
 		}
@@ -95,7 +123,7 @@ public class EarthController extends UniverseController
 		if (unit.unitType() != UnitType.Worker) {
 			throw new Exception("Non-worker tryReplicate() call");
 		}
-		/*Direction where = null;
+		Direction where = null;
 		for (Direction d: directions)
 		{
 			if (gc.canReplicate(unitId, d))
@@ -108,7 +136,45 @@ public class EarthController extends UniverseController
 		{
 			gc.replicate(unitId, where);
 			return true;
-		}*/
+		}
+		return false;
+	}
+
+	static boolean tryRepairBlueprint(int unitId) throws Exception
+	{
+		//possibly slow performance
+		Unit unit = gc.unit(unitId);
+		MapLocation curLoc = unit.location().mapLocation();
+
+		if (unit.unitType() != UnitType.Worker) {
+			throw new Exception("Non-worker tryRepairBlueprint() call");
+		}
+
+		int blueprintId = -1;
+		Direction whereIsIt = null;
+
+		// what an O(N) complexity
+		for (long j = 0;j < numunits;j++)
+		{
+			Unit potentialStructure = units.get(j);
+			if (potentialStructure.unitType() == UnitType.Factory)
+			{
+				if (potentialStructure.structureIsBuilt() > 0 && potentialStructure.health() < potentialStructure.maxHealth() && curLoc.isAdjacentTo(potentialStructure.location().mapLocation()))
+				{
+					blueprintId = potentialStructure.id();
+					whereIsIt = curLoc.directionTo(potentialStructure.location().mapLocation());
+					break;
+				}
+			}
+		}
+		if (blueprintId != -1)
+		{
+			if (gc.canRepair(unitId, blueprintId))
+			{
+				gc.repair(unitId, blueprintId);
+				return true;
+			}
+		}
 		return false;
 	}
 
@@ -129,17 +195,19 @@ public class EarthController extends UniverseController
 		for (long j = 0;j < numunits;j++)
 		{
 			Unit potentialStructure = units.get(j);
-			if (potentialStructure.unitType() == UnitType.Factory && potentialStructure.structureIsBuilt() == 1)
-				// TODO figure out why structureIsBuilt() is returning a short and not a boolean
+			if (potentialStructure.unitType() == UnitType.Factory)
 			{
-				if (blueprintId == -1)
+				if (potentialStructure.structureIsBuilt() == 0)
 				{
-					blueprintId = potentialStructure.id();
-					whereIsIt = curLoc.directionTo(potentialStructure.location().mapLocation());
-				} else if (curLoc.distanceSquaredTo(potentialStructure.location().mapLocation()) < curLoc.distanceSquaredTo(units.get(blueprintId).location().mapLocation()))
-				{
-					blueprintId = potentialStructure.id();
-					whereIsIt = curLoc.directionTo(potentialStructure.location().mapLocation());
+					if (blueprintId == -1)
+					{
+						blueprintId = potentialStructure.id();
+						whereIsIt = curLoc.directionTo(potentialStructure.location().mapLocation());
+					} else if (curLoc.distanceSquaredTo(potentialStructure.location().mapLocation()) < curLoc.distanceSquaredTo(potentialStructure.location().mapLocation()))
+					{
+						blueprintId = potentialStructure.id();
+						whereIsIt = curLoc.directionTo(potentialStructure.location().mapLocation());
+					}
 				}
 			}
 		}
@@ -181,6 +249,106 @@ public class EarthController extends UniverseController
 		if (where != null)
 		{
 			gc.blueprint(unitId, toBlueprint, where);
+			if (toBlueprint == UnitType.Factory)
+			{
+				numFactoryBlueprints++;
+			} else
+			{
+				numRocketBlueprints++;
+			}
+			return true;
+		}
+		return false;
+	}
+
+	static boolean tryToUnload(int unitId) throws Exception
+	{
+		//possibly slow performance
+		Unit unit = gc.unit(unitId);
+		MapLocation curLoc = unit.location().mapLocation();
+
+		if (unit.unitType() != UnitType.Factory) {
+			throw new Exception("Non-factory tryToUnload() call");
+		}
+
+		if (unit.structureGarrison().size() == 0)
+		{
+			return false;
+		}
+
+		Direction where = null;
+		for (Direction d: directions)
+		{
+			if (gc.canUnload(unitId, d))
+			{
+				where = d;
+				break;
+			}
+		}
+		if (where != null)
+		{
+			gc.unload(unitId, where);
+			return true;
+		}
+		return false;
+	}
+
+	static boolean tryProduceRobot(int unitId) throws Exception
+	{
+		//possibly slow performance
+		Unit unit = gc.unit(unitId);
+		MapLocation curLoc = unit.location().mapLocation();
+
+		if (unit.unitType() != UnitType.Factory) {
+			throw new Exception("Non-factory tryProduceRobot() call");
+		}
+
+		UnitType toProduce = UnitType.Ranger;
+		if (gc.canProduceRobot(unitId, toProduce))
+		{
+			gc.produceRobot(unitId, toProduce);
+			return true;
+		}
+		return false;
+	}
+
+	static boolean tryAttack(int unitId) throws Exception
+	{
+		//possibly slow performance
+		Unit unit = gc.unit(unitId);
+		MapLocation curLoc = unit.location().mapLocation();
+
+		if (unit.unitType() != UnitType.Knight && unit.unitType() != UnitType.Ranger && unit.unitType() != UnitType.Mage) {
+			throw new Exception("Non-attacker tryAttack() call");
+		}
+
+		Unit bestAttack = null;
+		VecUnit options = gc.senseNearbyUnitsByTeam(curLoc, 50, enemyTeam);
+		long numOptions = options.size();
+		for (long i = 0;i < numOptions;i++)
+		{
+			Unit whatOnSquare = options.get(i);
+			if (bestAttack == null)
+			{
+				bestAttack = whatOnSquare;
+			} else if (curLoc.distanceSquaredTo(whatOnSquare.location().mapLocation()) < curLoc.distanceSquaredTo(bestAttack.location().mapLocation()))
+			{
+				bestAttack = whatOnSquare;
+			}
+		}
+		if (bestAttack == null)
+		{
+			return false;
+		}
+		if (gc.canAttack(unitId, bestAttack.id()))
+		{
+			gc.attack(unitId, bestAttack.id());
+			return true;
+		}
+		Direction whereIsIt = curLoc.directionTo(bestAttack.location().mapLocation());
+		if (gc.isMoveReady(unitId) && gc.canMove(unitId, whereIsIt))
+		{
+			gc.moveRobot(unitId, whereIsIt);
 			return true;
 		}
 		return false;
@@ -205,7 +373,7 @@ public class EarthController extends UniverseController
 				for (Direction e : directions) {
 					MapLocation tmpLook = curLoc.add(d).add(e);
 
-					if (earthMap.onMap(tmpLook)) {
+					if (EarthMap.onMap(tmpLook)) {
 						altKarbonite += gc.karboniteAt(tmpLook);
 					}
 				}
