@@ -108,7 +108,7 @@ public class EarthController extends UniverseController
 					System.out.println("Round "+roundNum+": harvest x"+done);
 					continue;
 				}
-				for (Direction d: directions)
+				/*for (Direction d: directions)
 				{
 					ArrayList<Unit> things = new ArrayList<Unit>();
 					things.add(gc.senseUnitAtLocation(initialWorkers[0][i]));
@@ -124,7 +124,7 @@ public class EarthController extends UniverseController
 					}
 					if (done > 0)
 						break;
-				}
+				}*/
 				if (done > 0)
 				{
 					System.out.println("Round "+roundNum+": move around x"+done);
@@ -161,12 +161,17 @@ public class EarthController extends UniverseController
 				if (!units.get(i).location().isInGarrison() && !units.get(i).location().isInSpace())
 				{
 					tryAttack(units.get(i).id());
-					if (numRangers*8 >= EarthMap.getWidth()+EarthMap.getHeight())
+					// calculate number of nearby friendly rangers
+					int numNearbyFriendlyRangers = 0;
+					VecUnit nearbyRangers = gc.senseNearbyUnitsByType(units.get(i).location().mapLocation(), units.get(i).attackRange(), UnitType.Ranger);
+					for (long z = 0;z < nearbyRangers.size();z++) if (nearbyRangers.get(z).team() == myTeam)
+						numNearbyFriendlyRangers++;
+					if (numNearbyFriendlyRangers*8 >= EarthMap.getWidth()+EarthMap.getHeight())
 					{
 						tryMoveAttacker(units.get(i).id());
 					} else
 					{
-						tryMoveForFood(units.get(i).id());
+						//tryMoveForFood(units.get(i).id());
 					}
 				}
 			} else if (roundNum > 30 && units.get(i).unitType() == UnitType.Worker) {
@@ -174,7 +179,7 @@ public class EarthController extends UniverseController
 				{
 					//tryRepairBlueprint(units.get(i).id());
 					//if (numWorkers*100 < EarthMap.getWidth()*EarthMap.getHeight()) tryReplicate(units.get(i).id());
-					if (roundNum%45 == 0 && notYetReplicated)
+					if (roundNum%150 == 0 && notYetReplicated)
 					{
 						MapLocation result = tryReplicate(units.get(i).id());
 						if (result != null) notYetReplicated = false;
@@ -471,12 +476,12 @@ public class EarthController extends UniverseController
 			gc.attack(unitId, bestAttack.id());
 			return true;
 		}
-		Direction whereIsIt = curLoc.directionTo(bestAttack.location().mapLocation());
+		/*Direction whereIsIt = curLoc.directionTo(bestAttack.location().mapLocation());
 		if (gc.isMoveReady(unitId) && gc.canMove(unitId, whereIsIt))
 		{
 			gc.moveRobot(unitId, whereIsIt);
 			return true;
-		}
+		}*/
 		return false;
 	}
 
