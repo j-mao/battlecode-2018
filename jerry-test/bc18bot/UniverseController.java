@@ -47,6 +47,15 @@ public class UniverseController
 	// for debugging purposes
 	private static final int scheduledDeath = 2500;
 
+	// last location where an enemy was seen
+	static MapLocation lastSeenEnemy;
+
+	// units that are currently in vision
+	static VecUnit units;
+	static VecUnit allUnits;
+	static int numunits;
+	static int numallunits;
+
 	static ArrayList<Boolean> tryMovePackOfRobots(ArrayList<Unit> pack, Direction where)
 	{
 		int sizeOfPack = pack.size();
@@ -193,5 +202,239 @@ public class UniverseController
 			System.out.print("Rockets="+numRockets+"built+"+numRocketBlueprints+"unbuilt; ");
 			System.out.println();
 		}
+	}
+
+	static void getUnitSets() throws Exception
+	{
+		units = gc.myUnits();
+		numunits = (int)units.size();
+		allUnits = gc.units();
+		numallunits = (int)allUnits.size();
+	}
+
+	static void checkForEnemyUnits() throws Exception
+	{
+		for (int i = 0;i < numallunits;i++) if (allUnits.get(i).team() == enemyTeam)
+		{
+			if (!allUnits.get(i).location().isInGarrison() && !allUnits.get(i).location().isInSpace())
+			{
+				lastSeenEnemy = allUnits.get(i).location().mapLocation();
+				break;
+			}
+		}
+	}
+
+	static boolean tryHarvest (int unitId) throws Exception {
+		//possibly slow performance
+		Unit unit = gc.unit(unitId);
+		MapLocation curLoc = unit.location().mapLocation();
+
+		if (unit.unitType() != UnitType.Worker) {
+			throw new Exception("Non-worker tryHarvest() call");
+		}
+
+		long bestKarbonite = 0;
+		Direction bestFarm = null;
+		for (Direction d: directions)
+		{
+			if (gc.canHarvest(unitId, d))
+			{
+				long altKarbonite = gc.karboniteAt(curLoc.add(d));
+				if (altKarbonite > bestKarbonite)
+				{
+					bestKarbonite = altKarbonite;
+					bestFarm = d;
+				}
+			}
+		}
+
+		if (bestKarbonite > 0) {
+			//System.out.printf("Unit ID %d harvested %d\n", unitId, bestKarbonite);
+			//System.out.printf("Before: %d\n", gc.karbonite());
+			gc.harvest(unitId, bestFarm);
+			//System.out.printf("After: %d\n", gc.karbonite());
+			return true;
+		} else {
+			return false;
+		}
+	}
+
+	static MapLocation tryReplicate(int unitId) throws Exception
+	{
+		Unit unit = gc.unit(unitId);
+		MapLocation curLoc = unit.location().mapLocation();
+
+		if (unit.unitType() != UnitType.Worker) {
+			throw new Exception("Non-worker tryReplicate() call");
+		}
+		Direction where = null;
+		for (Direction d: directions)
+		{
+			if (gc.canReplicate(unitId, d))
+			{
+				where = d;
+				break;
+			}
+		}
+		if (where != null)
+		{
+			gc.replicate(unitId, where);
+			numWorkers++;
+			return curLoc.add(where);
+		}
+		return null;
+	}
+
+	static boolean tryToUnload(int unitId) throws Exception
+	{
+		//possibly slow performance
+		Unit unit = gc.unit(unitId);
+		MapLocation curLoc = unit.location().mapLocation();
+
+		if (unit.unitType() != UnitType.Factory) {
+			throw new Exception("Non-factory tryToUnload() call");
+		}
+
+		if (unit.structureGarrison().size() == 0)
+		{
+			return false;
+		}
+
+		Direction where = null;
+		for (Direction d: directions)
+		{
+			if (gc.canUnload(unitId, d))
+			{
+				where = d;
+				break;
+			}
+		}
+		if (where != null)
+		{
+			gc.unload(unitId, where);
+			return true;
+		}
+		return false;
+	}
+
+	static boolean tryAttack(int unitId) throws Exception
+	{
+		//possibly slow performance
+		Unit unit = gc.unit(unitId);
+		MapLocation curLoc = unit.location().mapLocation();
+
+		if (unit.unitType() != UnitType.Knight && unit.unitType() != UnitType.Ranger && unit.unitType() != UnitType.Mage) {
+			throw new Exception("Non-attacker tryAttack() call");
+		}
+
+		Unit bestAttack = null;
+		VecUnit options = gc.senseNearbyUnitsByTeam(curLoc, 50, enemyTeam);
+		long numOptions = options.size();
+		for (long i = 0;i < numOptions;i++)
+		{
+			Unit whatOnSquare = options.get(i);
+			if (bestAttack == null)
+			{
+				bestAttack = whatOnSquare;
+			} else if (curLoc.distanceSquaredTo(whatOnSquare.location().mapLocation()) <= unit.attackRange() && curLoc.distanceSquaredTo(bestAttack.location().mapLocation()) <= unit.attackRange())
+			{
+				if (attackPriority(bestAttack.unitType()) < attackPriority(whatOnSquare.unitType()))
+					bestAttack = whatOnSquare;
+			} else if (curLoc.distanceSquaredTo(whatOnSquare.location().mapLocation()) < curLoc.distanceSquaredTo(bestAttack.location().mapLocation()))
+			{
+				bestAttack = whatOnSquare;
+			}
+		}
+		if (bestAttack == null)
+		{
+			return false;
+		}
+		if (gc.isAttackReady(unitId) && gc.canAttack(unitId, bestAttack.id()))
+		{
+			gc.attack(unitId, bestAttack.id());
+			return true;
+		}
+		/*Direction whereIsIt = curLoc.directionTo(bestAttack.location().mapLocation());
+		if (gc.isMoveReady(unitId) && gc.canMove(unitId, whereIsIt))
+		{
+			gc.moveRobot(unitId, whereIsIt);
+			return true;
+		}*/
+		return false;
+	}
+
+	public static boolean tryMoveForFood (int unitId) throws Exception {
+		if (!gc.isMoveReady(unitId)) {
+			return false;
+		}
+
+		Unit unit = gc.unit(unitId);
+		MapLocation curLoc = unit.location().mapLocation();
+
+
+		long bestKarbonite = 0;
+		Direction bestMove = null;
+
+		for (Direction d: directions) {
+			if (gc.canMove(unitId, d)) {
+				long altKarbonite = 0;
+
+				for (Direction e : directions) {
+					MapLocation tmpLook = curLoc.add(d).add(e);
+
+					if (EarthMap.onMap(tmpLook)) {
+						altKarbonite += gc.karboniteAt(tmpLook);
+					}
+				}
+
+				if (altKarbonite > bestKarbonite) {
+					bestKarbonite = altKarbonite;
+					bestMove = d;
+				}
+			}
+		}
+
+		if (bestMove == null) {
+			return false;
+		}
+
+		gc.moveRobot(unitId, bestMove);
+		return true;
+	}
+
+	static void tryMoveAttacker(int unitId) throws Exception
+	{
+		if (gc.senseNearbyUnitsByTeam(gc.unit(unitId).location().mapLocation(), gc.unit(unitId).attackRange(), enemyTeam).size() > 0) return;
+		if (gc.isMoveReady(unitId))
+		{
+			Direction prefer = gc.unit(unitId).location().mapLocation().directionTo(lastSeenEnemy);
+			for (int i = 0;i < 4;i++)
+			{
+				Direction d = Direction.swigToEnum((prefer.swigValue()+i)%8);
+				if (gc.canMove(unitId, d))
+				{
+					gc.moveRobot(unitId, d);
+					break;
+				}
+				d = Direction.swigToEnum((prefer.swigValue()+8-i)%8);
+				if (gc.canMove(unitId, d))
+				{
+					gc.moveRobot(unitId, d);
+					break;
+				}
+			}
+		}
+	}
+
+	static int attackPriority(UnitType u)
+	{
+		if (u == UnitType.Ranger) return 10;
+		if (u == UnitType.Mage) return 8;
+		if (u == UnitType.Factory) return 7;
+		if (u == UnitType.Knight) return 6;
+		if (u == UnitType.Rocket) return 5;
+		if (u == UnitType.Worker) return 3;
+		if (u == UnitType.Healer) return 0;
+		return -1;
 	}
 }

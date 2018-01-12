@@ -18,31 +18,13 @@ import bc18bot.UniverseController;
 
 public class EarthController extends UniverseController
 {
-	static VecUnit units;
-	static VecUnit allUnits;
-	static int numunits;
-	static int numallunits;
 	static int numStartingWorkers;
-
 	static MapLocation[][] initialWorkers;
-
-	static MapLocation lastSeenEnemy;
 
 	public static void runTurn() throws Exception
 	{
-		units = gc.myUnits();
-		numunits = (int)units.size();
-		allUnits = gc.units();
-		numallunits = (int)allUnits.size();
-
-		for (int i = 0;i < numallunits;i++) if (allUnits.get(i).team() == enemyTeam)
-		{
-			if (!allUnits.get(i).location().isInGarrison() && !allUnits.get(i).location().isInSpace())
-			{
-				lastSeenEnemy = allUnits.get(i).location().mapLocation();
-				break;
-			}
-		}
+		getUnitSets();
+		checkForEnemyUnits();
 
 		if (roundNum == 1)
 		{
@@ -204,67 +186,6 @@ public class EarthController extends UniverseController
 		}
 	}
 
-	static boolean tryHarvest (int unitId) throws Exception {
-		//possibly slow performance
-		Unit unit = gc.unit(unitId);
-		MapLocation curLoc = unit.location().mapLocation();
-
-		if (unit.unitType() != UnitType.Worker) {
-			throw new Exception("Non-worker tryHarvest() call");
-		}
-
-		long bestKarbonite = 0;
-		Direction bestFarm = null;
-		for (Direction d: directions)
-		{
-			if (gc.canHarvest(unitId, d))
-			{
-				long altKarbonite = gc.karboniteAt(curLoc.add(d));
-				if (altKarbonite > bestKarbonite)
-				{
-					bestKarbonite = altKarbonite;
-					bestFarm = d;
-				}
-			}
-		}
-
-		if (bestKarbonite > 0) {
-			//System.out.printf("Unit ID %d harvested %d\n", unitId, bestKarbonite);
-			//System.out.printf("Before: %d\n", gc.karbonite());
-			gc.harvest(unitId, bestFarm);
-			//System.out.printf("After: %d\n", gc.karbonite());
-			return true;
-		} else {
-			return false;
-		}
-	}
-
-	static MapLocation tryReplicate(int unitId) throws Exception
-	{
-		Unit unit = gc.unit(unitId);
-		MapLocation curLoc = unit.location().mapLocation();
-
-		if (unit.unitType() != UnitType.Worker) {
-			throw new Exception("Non-worker tryReplicate() call");
-		}
-		Direction where = null;
-		for (Direction d: directions)
-		{
-			if (gc.canReplicate(unitId, d))
-			{
-				where = d;
-				break;
-			}
-		}
-		if (where != null)
-		{
-			gc.replicate(unitId, where);
-			numWorkers++;
-			return curLoc.add(where);
-		}
-		return null;
-	}
-
 	static boolean tryRepairBlueprint(int unitId) throws Exception
 	{
 		//possibly slow performance
@@ -388,38 +309,6 @@ public class EarthController extends UniverseController
 		return false;
 	}
 
-	static boolean tryToUnload(int unitId) throws Exception
-	{
-		//possibly slow performance
-		Unit unit = gc.unit(unitId);
-		MapLocation curLoc = unit.location().mapLocation();
-
-		if (unit.unitType() != UnitType.Factory) {
-			throw new Exception("Non-factory tryToUnload() call");
-		}
-
-		if (unit.structureGarrison().size() == 0)
-		{
-			return false;
-		}
-
-		Direction where = null;
-		for (Direction d: directions)
-		{
-			if (gc.canUnload(unitId, d))
-			{
-				where = d;
-				break;
-			}
-		}
-		if (where != null)
-		{
-			gc.unload(unitId, where);
-			return true;
-		}
-		return false;
-	}
-
 	static boolean tryProduceRobot(int unitId) throws Exception
 	{
 		//possibly slow performance
@@ -439,115 +328,6 @@ public class EarthController extends UniverseController
 		return false;
 	}
 
-	static boolean tryAttack(int unitId) throws Exception
-	{
-		//possibly slow performance
-		Unit unit = gc.unit(unitId);
-		MapLocation curLoc = unit.location().mapLocation();
-
-		if (unit.unitType() != UnitType.Knight && unit.unitType() != UnitType.Ranger && unit.unitType() != UnitType.Mage) {
-			throw new Exception("Non-attacker tryAttack() call");
-		}
-
-		Unit bestAttack = null;
-		VecUnit options = gc.senseNearbyUnitsByTeam(curLoc, 50, enemyTeam);
-		long numOptions = options.size();
-		for (long i = 0;i < numOptions;i++)
-		{
-			Unit whatOnSquare = options.get(i);
-			if (bestAttack == null)
-			{
-				bestAttack = whatOnSquare;
-			} else if (curLoc.distanceSquaredTo(whatOnSquare.location().mapLocation()) <= unit.attackRange() && curLoc.distanceSquaredTo(bestAttack.location().mapLocation()) <= unit.attackRange())
-			{
-				if (attackPriority(bestAttack.unitType()) < attackPriority(whatOnSquare.unitType()))
-					bestAttack = whatOnSquare;
-			} else if (curLoc.distanceSquaredTo(whatOnSquare.location().mapLocation()) < curLoc.distanceSquaredTo(bestAttack.location().mapLocation()))
-			{
-				bestAttack = whatOnSquare;
-			}
-		}
-		if (bestAttack == null)
-		{
-			return false;
-		}
-		if (gc.isAttackReady(unitId) && gc.canAttack(unitId, bestAttack.id()))
-		{
-			gc.attack(unitId, bestAttack.id());
-			return true;
-		}
-		/*Direction whereIsIt = curLoc.directionTo(bestAttack.location().mapLocation());
-		if (gc.isMoveReady(unitId) && gc.canMove(unitId, whereIsIt))
-		{
-			gc.moveRobot(unitId, whereIsIt);
-			return true;
-		}*/
-		return false;
-	}
-
-	public static boolean tryMoveForFood (int unitId) throws Exception {
-		if (!gc.isMoveReady(unitId)) {
-			return false;
-		}
-
-		Unit unit = gc.unit(unitId);
-		MapLocation curLoc = unit.location().mapLocation();
-
-
-		long bestKarbonite = 0;
-		Direction bestMove = null;
-
-		for (Direction d: directions) {
-			if (gc.canMove(unitId, d)) {
-				long altKarbonite = 0;
-
-				for (Direction e : directions) {
-					MapLocation tmpLook = curLoc.add(d).add(e);
-
-					if (EarthMap.onMap(tmpLook)) {
-						altKarbonite += gc.karboniteAt(tmpLook);
-					}
-				}
-
-				if (altKarbonite > bestKarbonite) {
-					bestKarbonite = altKarbonite;
-					bestMove = d;
-				}
-			}
-		}
-
-		if (bestMove == null) {
-			return false;
-		}
-
-		gc.moveRobot(unitId, bestMove);
-		return true;
-	}
-
-	static void tryMoveAttacker(int unitId) throws Exception
-	{
-		if (gc.senseNearbyUnitsByTeam(gc.unit(unitId).location().mapLocation(), gc.unit(unitId).attackRange(), enemyTeam).size() > 0) return;
-		if (gc.isMoveReady(unitId))
-		{
-			Direction prefer = gc.unit(unitId).location().mapLocation().directionTo(lastSeenEnemy);
-			for (int i = 0;i < 4;i++)
-			{
-				Direction d = Direction.swigToEnum((prefer.swigValue()+i)%8);
-				if (gc.canMove(unitId, d))
-				{
-					gc.moveRobot(unitId, d);
-					break;
-				}
-				d = Direction.swigToEnum((prefer.swigValue()+8-i)%8);
-				if (gc.canMove(unitId, d))
-				{
-					gc.moveRobot(unitId, d);
-					break;
-				}
-			}
-		}
-	}
-
 	static void tryToLoadRocket(int unitId) throws Exception
 	{
 		//possibly slow performance
@@ -564,17 +344,5 @@ public class EarthController extends UniverseController
 				gc.load(unitId, loadableUnits.get(i).id());
 			}
 		}
-	}
-
-	static int attackPriority(UnitType u)
-	{
-		if (u == UnitType.Ranger) return 10;
-		if (u == UnitType.Mage) return 8;
-		if (u == UnitType.Factory) return 7;
-		if (u == UnitType.Knight) return 6;
-		if (u == UnitType.Rocket) return 5;
-		if (u == UnitType.Worker) return 3;
-		if (u == UnitType.Healer) return 0;
-		return -1;
 	}
 }
