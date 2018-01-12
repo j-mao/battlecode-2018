@@ -42,6 +42,7 @@ public class Player {
     private static int randDirOrder[];
     // factories that are currently blueprints
     private static ArrayList<Unit> factoriesBeingBuilt = new ArrayList<Unit>();
+    private static int workerCount;
 
     public static void main(String[] args) {
 
@@ -146,9 +147,14 @@ public class Player {
                 hasFriendlyUnit[y][x] = false;
             }
         }
+        workerCount = 0;
         VecUnit units = gc.units();
         for (int i = 0; i < units.size(); i++) {
+            // Note: This loops through friendly AND enemy units!
             Unit unit = units.get(i);
+            if (unit.team() == gc.team() && unit.unitType() == UnitType.Worker) {
+                workerCount++;
+            }
             if (unit.team() == gc.team() && unit.location().isOnMap()) {
                 MapLocation loc = unit.location().mapLocation();
                 hasFriendlyUnit[loc.getY()][loc.getX()] = true;
@@ -222,46 +228,55 @@ public class Player {
     }
 
     private static void runWorker(Unit unit) {
-        boolean done = false;
+        boolean doneAction = false;
+        boolean doneMovement = false;
 
-        // try to build an adjacent factory blueprint
-        if (!done) {
-            VecUnit units = gc.senseNearbyUnits(unit.location().mapLocation(), 2);
-            for (int i = 0; i < units.size(); i++) {
-                Unit other = units.get(i);
-                if (other.unitType() == UnitType.Factory && gc.canBuild(unit.id(), other.id())) {
-                    gc.build(unit.id(), other.id());
-                    done = true;
+        // try to replicate
+        // TODO: limit to 8 workers
+        // TODO: only replicate if there is enough money
+        // TODO: improve metric of "enough money"
+        System.out.println("ability cooldown = " + unit.abilityCooldown() + ", heat = " + unit.abilityHeat());
+        // check we don't have too many workers, and that we have enough money for a factory
+        // TODO: make this logic better. e.g. we might need money for a factory in the future
+        // TODO: Find out where cost constants are and replay this "100 + 15" with those xd.
+        if (workerCount < 8 && gc.karbonite() > 100 + 15) {
+            shuffleDirOrder();
+            for (int i = 0; i < 8; i++) {
+                if (gc.canReplicate(unit.id(), directions[randDirOrder[i]])) {
+                    gc.replicate(unit.id(), directions[randDirOrder[i]]);
+                    // TODO: add created units to units list so they can do something immediately on the turn they're created
+                    MapLocation loc = unit.location().mapLocation().add(directions[randDirOrder[i]]);
+                    hasFriendlyUnit[loc.getY()][loc.getX()] = true;
+                    // TODO: test on a rectangular map to make sure I didn't mess up any y, x orders anywhere
+                    doneAction = true;
                     break;
                 }
             }
         }
 
-        // try to build adjacent factory blueprint (this code is currently unused)
-        // looks like hasUnitAtLocation is bugged?
-        if (false && !done) {
-            // try build blueprint
-            for (int i = 0; i < 8; i++) {
-                MapLocation loc = unit.location().mapLocation().add(directions[i]);
-                if (false && gc.canSenseLocation(loc) && gc.hasUnitAtLocation(loc)) {
-                    Unit other = gc.senseUnitAtLocation(loc);
-                    if (gc.canBuild(unit.id(), other.id())) {
-                        gc.build(unit.id(), other.id());
-                        done = true;
-                        break;
-                    }
+        // try to build an adjacent factory blueprint
+        if (!doneAction) {
+            VecUnit units = gc.senseNearbyUnits(unit.location().mapLocation(), 2);
+            for (int i = 0; i < units.size(); i++) {
+                Unit other = units.get(i);
+                if (other.unitType() == UnitType.Factory && gc.canBuild(unit.id(), other.id())) {
+                    gc.build(unit.id(), other.id());
+                    doneAction = true;
+                    doneMovement = true;
+                    break;
                 }
             }
         }
 
         // try to blueprint
-        if (!done) {
+        if (!doneAction) {
             Direction dir = directions[rand.nextInt(8)];
             if (factoriesBeingBuilt.isEmpty() && gc.canBlueprint(unit.id(), UnitType.Factory, dir)) {
                 gc.blueprint(unit.id(), UnitType.Factory, dir);
                 MapLocation loc = unit.location().mapLocation().add(dir);
                 hasFriendlyUnit[loc.getY()][loc.getX()] = true;
-                done = true;
+                doneAction = true;
+                doneMovement = true;
                 Unit other = gc.senseUnitAtLocation(loc);
                 System.out.println("The factory I just built is here: " + other.toString());
                 // TODO: continue this
@@ -272,9 +287,9 @@ public class Player {
         }
 
         // if there is a factory blueprint somewhere, try to move towards it to help build it
-        if (!done && !factoriesBeingBuilt.isEmpty()) {
+        if (!doneMovement && !factoriesBeingBuilt.isEmpty()) {
             // set done to true so we don't move randomly
-            done = true;
+            doneMovement = true;
 
             // bfs to within distance 1 of every square because we want to move within distance 1 of a factory
             bfs(unit.location().mapLocation(), 1);
@@ -291,12 +306,21 @@ public class Player {
         }
 
         // otherwise move randomly
-        if (!done) {
+        if (!doneMovement) {
             Direction dir = directions[rand.nextInt(8)];
 
             // Most methods on gc take unit IDs, instead of the unit objects themselves.
             if (gc.isMoveReady(unit.id()) && gc.canMove(unit.id(), dir)) {
                 doMoveRobot(unit, dir);
+            }
+        }
+
+        if (!doneAction) {
+            for (int i = 0; i < 9; i++) {
+                if (gc.canHarvest(unit.id(), directions[i])) {
+                    System.out.println("harvesting!");
+                    gc.harvest(unit.id(), directions[i]);
+                }
             }
         }
     }
