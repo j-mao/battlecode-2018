@@ -4,7 +4,6 @@ import bc.*;
 import java.util.Random;
 import java.util.Map;
 import java.util.HashMap;
-import java.util.ArrayList;
 
 public class Player {
 
@@ -13,15 +12,12 @@ public class Player {
     // Direction is a normal java enum.
     private static Direction[] directions = Direction.values();
     private static Map<Integer, Integer> tendency = new HashMap<Integer, Integer>();
-    private static ArrayList<MapLocation> attackLocs = new ArrayList<MapLocation>();
 
     public static void main(String[] args) {
         // MapLocation is a data structure you'll use a lot.
         MapLocation loc = new MapLocation(Planet.Earth, 10, 20);
         System.out.println("loc: " + loc + ", one step to the Northwest: " + loc.add(Direction.Northwest));
         System.out.println("loc x: " + loc.getX());
-
-        initialize();
 
         // One slightly weird thing: some methods are currently static methods on a static class called bc.
         // This will eventually be fixed :/
@@ -48,29 +44,6 @@ public class Player {
             }
             // Submit the actions we've done, and wait for our next turn.
             gc.nextTurn();
-        }
-    }
-
-    private static int getDirIndex(Direction dir) {
-        // TODO: make this faster?
-        for (int i = 0; i < 8; i++) {
-            if (directions[i] == dir) {
-                return i;
-            }
-        }
-        System.out.println("ERROR: Couldn't find dir index for: " + dir.toString());
-        return 0;
-    }
-
-    private static void initialize() {
-        PlanetMap earthMap = gc.startingMap(Planet.Earth);
-        VecUnit units = earthMap.getInitial_units();
-        for (int i = 0; i < units.size(); i++) {
-            Unit unit = units.get(i);
-            if (unit.team() != gc.team()) {
-                System.out.println("Adding attack location " + unit.location().mapLocation().toString());
-                attackLocs.add(unit.location().mapLocation());
-            }
         }
     }
 
@@ -150,10 +123,10 @@ public class Player {
 
         if (doMove) {
             if (gc.isMoveReady(unit.id())) {
-                Direction moveDir = directions[getTendency(unit)];
+                Direction moveDir = directions[getTendency(unit.id())];
                 if (gc.canMove(unit.id(), moveDir)) {
                     gc.moveRobot(unit.id(), moveDir);
-                    updateTendency(unit.id(), 6);
+                    updateTendency(unit.id(), 20);
                 } else {
                     updateTendency(unit.id(), 100);
                 }
@@ -161,26 +134,14 @@ public class Player {
         }
     }
 
-    private static int getTendency(Unit unit) {
-        if (!tendency.containsKey(unit.id())) {
-            if (attackLocs.isEmpty()) {
-                tendency.put(unit.id(), rand.nextInt(8));
-            } else if (unit.location().isOnMap()) {
-                tendency.put(unit.id(), getDirIndex(unit.location().mapLocation().directionTo(attackLocs.get(attackLocs.size()-1))));
-                System.out.println("Trying to attack enemy starting location!");
-            } else {
-                // in garrison or space or something
-                // don't set tendency yet and just return something random
-                return rand.nextInt(8);
-            }
+    private static int getTendency(int id) {
+        if (!tendency.containsKey(id)) {
+            tendency.put(id, rand.nextInt(8));
         }
-        return tendency.get(unit.id());
+        return tendency.get(id);
     }
 
     private static void updateTendency(int id, int changeChance) {
-        if (!tendency.containsKey(id)) {
-            return;
-        }
         // assert tendency has id as key
         int k = tendency.get(id);
         int change = rand.nextInt(100);

@@ -1,0 +1,9 @@
+
+Current bots
+------------
+gp-experiment: Current bot that I'm working on
+
+Archived bots
+-------------
+gp-random-bot: Builds archers that move with tendency and attack
+
