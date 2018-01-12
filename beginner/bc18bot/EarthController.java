@@ -14,6 +14,9 @@ public class EarthController extends UniverseController
 	static VecUnit units;
 	static long numunits;
 
+	// merge gp tendency
+	private static Map<Integer, Integer> tendency = new HashMap<Integer, Integer>();
+
 	public static void runTurn() throws Exception
 	{
 		units = gc.myUnits();
@@ -33,31 +36,64 @@ public class EarthController extends UniverseController
 			//if (unit.unitType() == UnitType.Factory && unit.structureIsBuilt() == 1)
 			if (unit.unitType() == UnitType.Factory)
 			{
-				if (tryToUnload(unitId)) {
-					continue;
-				}
-				if (tryProduceRobot(unitId)) {
-					continue;
-				}
+				gpRunFactory(unit);
+				continue;
 			}
 
 			if (unit.unitType() == UnitType.Worker) {
-				// can I farm karbonite?
-				if (tryHarvest(unitId)) {
+
+				if (numFactories <= 1) {
+					// priorities first two factories
+
+					// make sure 2 factories or blueprints are on them map
+					if (numFactories + numFactoryBlueprints < 2) {
+						if (tryToBlueprint(unitId)) {
+							continue;
+						}
+					}
+
+					// can I build an existing blueprint? [or walk towards one]
+					if (tryBuildBlueprint(unitId)) {
+						continue;
+					}
+
+					//if you cannot build a blueprint or plant a blueprint, play normal worker
+				}
+
+				VecUnit nearbyUnits = gc.senseNearbyUnits(unit.location().mapLocation(), 2);
+
+				boolean shouldReplicate = true;
+				for (long j = 0; j < nearbyUnits.size(); j++) {
+					Unit u = nearbyUnits.get(j);
+					if (u.id() != unit.id() && u.unitType() == unit.unitType()) {
+						//if there is a nearby worker
+						shouldReplicate = false;
+					}
+				}
+
+				if (shouldReplicate && tryReplicate(unitId)) {
+					//tryMoveForFood(unitId);
 					continue;
 				}
+				
+				// can I farm karbonite?
+				if (tryHarvest(unitId)) {
+					//sometimes it's not best to stand in one spot
+					continue;
+				}
+
 				// can I repair an existing blueprint?
 				if (tryRepairBlueprint(unitId)) {
 					continue;
 				}
+
 				// can I build an existing blueprint? [or walk towards one]
 				if (tryBuildBlueprint(unitId)) {
 					continue;
 				}
-				// can I replicate?
-				if (tryReplicate(unitId)) {
-					continue;
-				}
+
+				tryMoveForFood(unitId);
+
 				// should && can I lay a blueprint?
 				if ((numFactories+numFactoryBlueprints)*8 <= numRangers)
 				{
@@ -67,7 +103,12 @@ public class EarthController extends UniverseController
 				}
 			}
 
-			if (unit.unitType() == UnitType.Knight || unit.unitType() == UnitType.Ranger || unit.unitType() == UnitType.Mage)
+			if (unit.unitType() == UnitType.Ranger) {
+				gpRunRanger(unit);
+				continue;
+			}
+
+			if (unit.unitType() == UnitType.Knight || unit.unitType() == UnitType.Mage)
 			{
 				// attack
 				if (gc.isAttackReady(unitId)) {
@@ -392,4 +433,65 @@ public class EarthController extends UniverseController
 		gc.moveRobot(unitId, bestMove);
 		return true;
 	}
+
+	private static void gpRunRanger(Unit unit) {
+        boolean doMove = true;
+
+        if (unit.location().isOnMap()) {
+            VecUnit units = gc.senseNearbyUnits(unit.location().mapLocation(), unit.attackRange());
+            for (int i = 0; i < units.size(); i++) {
+                Unit other = units.get(i);
+                if (other.team() != unit.team() && gc.canAttack(unit.id(), other.id())) {
+                    doMove = false;
+                    if (gc.isAttackReady(unit.id())) {
+                        gc.attack(unit.id(), other.id());
+                    }
+                }
+            }
+        }
+
+        if (doMove) {
+            if (gc.isMoveReady(unit.id())) {
+                Direction moveDir = directions[getTendency(unit.id())];
+                if (gc.canMove(unit.id(), moveDir)) {
+                    gc.moveRobot(unit.id(), moveDir);
+                    updateTendency(unit.id(), 20);
+                } else {
+                    updateTendency(unit.id(), 100);
+                }
+            }
+        }
+    }
+
+    private static int getTendency(int id) {
+        if (!tendency.containsKey(id)) {
+            tendency.put(id, rand.nextInt(8));
+        }
+        return tendency.get(id);
+    }
+
+    private static void updateTendency(int id, int changeChance) {
+        // assert tendency has id as key
+        int k = tendency.get(id);
+        int change = rand.nextInt(100);
+        if (change < changeChance / 2) {
+            k = (k + 1) % 8;
+        } else if (change < changeChance) {
+            k = (k + 7) % 8;
+        }
+        tendency.put(id, k);
+    }
+
+    private static void gpRunFactory (Unit unit) {
+        if (gc.canProduceRobot(unit.id(), UnitType.Ranger)) {
+            gc.produceRobot(unit.id(), UnitType.Ranger);
+        }
+
+        for (int j = 0; j < 8; j++) {
+            Direction unloadDir = directions[j];
+            if (gc.canUnload(unit.id(), unloadDir)) {
+                gc.unload(unit.id(), unloadDir);
+            }
+        }
+    }
 }
