@@ -7,6 +7,8 @@ import java.util.HashMap;
 import java.util.ArrayList;
 import java.util.Queue;
 import java.util.LinkedList;
+import java.util.PriorityQueue;
+import java.util.Comparator;
 
 public class Player {
 
@@ -23,6 +25,39 @@ public class Player {
             x = xx;
             startingDir = sd;
         }
+    }
+
+    // from https://stackoverflow.com/questions/683041/how-do-i-use-a-priorityqueue
+    // LuL not knowing how to use java in 2018 LuL
+    private static class UnitOrderComparator implements Comparator<Unit>
+    {
+        @Override
+        public int compare(Unit x, Unit y)
+        {
+            int xp = getUnitOrderPriority(x.unitType());
+            int yp = getUnitOrderPriority(y.unitType());
+            return xp - yp;
+        }
+    }
+
+    private static int getUnitOrderPriority(UnitType unitType) {
+        switch(unitType) {
+            // Actually not sure whether fighting units or workers should go first... so just use the same priority...
+            case Ranger:
+            case Knight:
+            case Mage:
+            case Healer:
+            // Worker before factory so that workers can finish a currently building factory before the factory runs
+            case Worker:
+                return 1;
+            // Factory before rocket so that factory can make a unit, then unit can get in rocket before the rocket runs
+            case Factory:
+                return 2;
+            case Rocket:
+                return 3;
+        }
+        System.out.println("ERROR: getUnitOrderPriority() does not recognise this unit type!");
+        return 9999;
     }
 
     private static GameController gc = new GameController();
@@ -45,6 +80,10 @@ public class Player {
     private static int factoryCount;
     private static ArrayList<Unit> factoriesBeingBuilt = new ArrayList<Unit>();
     private static int workerCount;
+    // Store this list of all our units ourselves, so that we can add to it when we create units and use those new units
+    // immediately.
+    private static Comparator<Unit> unitOrderComparator = new UnitOrderComparator();
+    private static PriorityQueue<Unit> allMyUnits = new PriorityQueue<Unit>(5, unitOrderComparator);
 
     public static void main(String[] args) {
 
@@ -74,13 +113,13 @@ public class Player {
         while (true) {
             System.out.println("Current round: " + gc.round());
 
+            // VecUnit is a class that you can think of as similar to ArrayList<Unit>, but immutable.
             VecUnit units = gc.myUnits();
             initTurn(units);
 
-            // VecUnit is a class that you can think of as similar to ArrayList<Unit>, but immutable.
-            for (int i = 0; i < units.size(); i++) {
-                Unit unit = units.get(i);
-                //System.out.println("running " + unit.unitType().toString());
+            while (!allMyUnits.isEmpty()) {
+                Unit unit = allMyUnits.remove();
+                System.out.println("running " + unit.unitType().toString());
 
                 switch (unit.unitType()) {
                     case Worker:
@@ -166,6 +205,11 @@ public class Player {
                 MapLocation loc = unit.location().mapLocation();
                 hasFriendlyUnit[loc.getY()][loc.getX()] = true;
             }
+        }
+
+        allMyUnits.clear();
+        for (int i = 0; i < myUnits.size(); i++) {
+            allMyUnits.add(myUnits.get(i));
         }
     }
 
