@@ -253,17 +253,34 @@ public class Player {
         // TODO: make this logic better. e.g. we might need money for a factory in the future
         // TODO: Find out where cost constants are and replay this "100 + 15" with those xd.
         if (workerCount < 7 && gc.karbonite() >= 100 + 15) {
+            // try to replicate next to currently building factory
             shuffleDirOrder();
+            Direction replicateDir = Direction.Center;
             for (int i = 0; i < 8; i++) {
-                if (gc.canReplicate(unit.id(), directions[randDirOrder[i]])) {
-                    gc.replicate(unit.id(), directions[randDirOrder[i]]);
-                    // TODO: add created units to units list so they can do something immediately on the turn they're created
-                    MapLocation loc = unit.location().mapLocation().add(directions[randDirOrder[i]]);
-                    hasFriendlyUnit[loc.getY()][loc.getX()] = true;
-                    // TODO: test on a rectangular map to make sure I didn't mess up any y, x orders anywhere
-                    doneAction = true;
+                Direction dir = directions[randDirOrder[i]];
+                if (gc.canReplicate(unit.id(), dir) &&
+                        isNextToBuildingFactory(unit.location().mapLocation().add(dir))) {
+                    replicateDir = dir;
                     break;
                 }
+            }
+            // otherwise, replicate wherever
+            if (replicateDir == Direction.Center) {
+                for (int i = 0; i < 8; i++) {
+                    Direction dir = directions[randDirOrder[i]];
+                    if (gc.canReplicate(unit.id(), dir)) {
+                        replicateDir = dir;
+                        break;
+                    }
+                }
+            }
+            if (replicateDir != Direction.Center) {
+                gc.replicate(unit.id(), replicateDir);
+                // TODO: add created units to units list so they can do something immediately on the turn they're created
+                MapLocation loc = unit.location().mapLocation().add(replicateDir);
+                hasFriendlyUnit[loc.getY()][loc.getX()] = true;
+                // TODO: test on a rectangular map to make sure I didn't mess up any y, x orders anywhere
+                doneAction = true;
             }
         }
 
@@ -300,7 +317,7 @@ public class Player {
                 }
                 if (best != -1) {
                     Direction dir = directions[randDirOrder[best]];
-                    System.out.println("blueprinting in direction " + dir.toString() + " with space " + bestSpace);
+                    //System.out.println("blueprinting in direction " + dir.toString() + " with space " + bestSpace);
                     gc.blueprint(unit.id(), UnitType.Factory, dir);
                     MapLocation loc = unit.location().mapLocation().add(dir);
                     hasFriendlyUnit[loc.getY()][loc.getX()] = true;
@@ -313,6 +330,13 @@ public class Player {
                     // TODO: implement worker replication
                     factoriesBeingBuilt.add(gc.senseUnitAtLocation(loc));
                 }
+            }
+        }
+
+        // if you're next to a factory don't move
+        if (!doneMovement) {
+            if (isNextToBuildingFactory(unit.location().mapLocation())) {
+                doneMovement = true;
             }
         }
 
@@ -505,5 +529,19 @@ public class Player {
 
     private static boolean isFriendlyStructure(Unit unit) {
         return unit.team() == gc.team() && (unit.unitType() == UnitType.Factory || unit.unitType() == UnitType.Rocket);
+    }
+
+    // Required: loc must be a valid location (ie not out of bounds)
+    private static boolean isNextToBuildingFactory(MapLocation loc) {
+        for (int i = 0; i < 8; i++) {
+            MapLocation other = loc.add(directions[i]);
+            if (gc.hasUnitAtLocation(other)) {
+                Unit unit = gc.senseUnitAtLocation(other);
+                if (unit.team() == gc.team() && unit.unitType() == UnitType.Factory && unit.structureIsBuilt() == 0) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 }
