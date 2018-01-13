@@ -56,18 +56,18 @@ public class Player {
 
         // MapLocation is a data structure you'll use a lot.
         MapLocation loc = new MapLocation(Planet.Earth, 10, 20);
-        System.out.println("loc: " + loc + ", one step to the Northwest: " + loc.add(Direction.Northwest));
-        System.out.println("loc x: " + loc.getX());
+        //System.out.println("loc: " + loc + ", one step to the Northwest: " + loc.add(Direction.Northwest));
+        //System.out.println("loc x: " + loc.getX());
 
         initialize();
 
-        for (int i = 0; i < 9; i++) {
+        /*for (int i = 0; i < 9; i++) {
             System.out.println("dir " + i + " is " + directions[i].toString());
-        }
+        }*/
 
         // One slightly weird thing: some methods are currently static methods on a static class called bc.
         // This will eventually be fixed :/
-        System.out.println("Opposite of " + Direction.North + ": " + bc.bcDirectionOpposite(Direction.North));
+        //System.out.println("Opposite of " + Direction.North + ": " + bc.bcDirectionOpposite(Direction.North));
 
         while (true) {
             System.out.println("Current round: " + gc.round());
@@ -116,7 +116,7 @@ public class Player {
         bfsSeen = new boolean[height][width];
         bfsDirectionIndexTo = new int[height][width];
         for (int y = 0; y < height; y++) for (int x = 0; x < width; x++) {
-            System.out.println("checking if there's passable terrain at " + new MapLocation(gc.planet(), x, y).toString());
+            //System.out.println("checking if there's passable terrain at " + new MapLocation(gc.planet(), x, y).toString());
             //System.out.println("is passable at y = " + y + ", x = " + x + " is " + earthMap.isPassableTerrainAt(new MapLocation(gc.planet(), x, y)));
             isPassable[y][x] = earthMap.isPassableTerrainAt(new MapLocation(gc.planet(), x, y)) != 0;
         }
@@ -124,7 +124,7 @@ public class Player {
         for (int i = 0; i < units.size(); i++) {
             Unit unit = units.get(i);
             if (unit.team() != gc.team()) {
-                System.out.println("Adding attack location " + unit.location().mapLocation().toString());
+                //System.out.println("Adding attack location " + unit.location().mapLocation().toString());
                 attackLocs.add(unit.location().mapLocation());
             }
         }
@@ -235,11 +235,11 @@ public class Player {
         // TODO: limit to 8 workers
         // TODO: only replicate if there is enough money
         // TODO: improve metric of "enough money"
-        System.out.println("ability cooldown = " + unit.abilityCooldown() + ", heat = " + unit.abilityHeat());
+        //System.out.println("ability cooldown = " + unit.abilityCooldown() + ", heat = " + unit.abilityHeat());
         // check we don't have too many workers, and that we have enough money for a factory
         // TODO: make this logic better. e.g. we might need money for a factory in the future
         // TODO: Find out where cost constants are and replay this "100 + 15" with those xd.
-        if (workerCount < 8 && gc.karbonite() > 100 + 15) {
+        if (workerCount < 8 && gc.karbonite() >= 100 + 15) {
             shuffleDirOrder();
             for (int i = 0; i < 8; i++) {
                 if (gc.canReplicate(unit.id(), directions[randDirOrder[i]])) {
@@ -278,7 +278,7 @@ public class Player {
                 doneAction = true;
                 doneMovement = true;
                 Unit other = gc.senseUnitAtLocation(loc);
-                System.out.println("The factory I just built is here: " + other.toString());
+                //System.out.println("The factory I just built is here: " + other.toString());
                 // TODO: continue this
                 // TODO: store ArrayList of current factory blueprints and implement workers moving towards them
                 // TODO: implement worker replication
@@ -298,7 +298,7 @@ public class Player {
             Unit factory = factoriesBeingBuilt.get(0);
             MapLocation loc = factory.location().mapLocation();
             Direction dir = directions[bfsDirectionIndexTo[loc.getY()][loc.getX()]];
-            System.out.println("worker moving to factory in dir " + dir.toString());
+            //System.out.println("worker moving to factory in dir " + dir.toString());
 
             if (gc.isMoveReady(unit.id()) && gc.canMove(unit.id(), dir)) {
                 doMoveRobot(unit, dir);
@@ -318,7 +318,7 @@ public class Player {
         if (!doneAction) {
             for (int i = 0; i < 9; i++) {
                 if (gc.canHarvest(unit.id(), directions[i])) {
-                    System.out.println("harvesting!");
+                    //System.out.println("harvesting!");
                     gc.harvest(unit.id(), directions[i]);
                 }
             }
@@ -327,7 +327,7 @@ public class Player {
 
     private static void runFactory(Unit unit) {
         if (gc.canProduceRobot(unit.id(), UnitType.Ranger)) {
-            System.out.println("PRODUCING ROBOT!!!");
+            //System.out.println("PRODUCING ROBOT!!!");
             gc.produceRobot(unit.id(), UnitType.Ranger);
         }
 
@@ -383,10 +383,10 @@ public class Player {
                             bestLoc = attackLocs.get(i);
                         }
                     }
-                    System.out.println("doing bfs");
+                    //System.out.println("doing bfs");
                     bfs(unit.location().mapLocation(), 0);
                     moveDir = directions[bfsDirectionIndexTo[bestLoc.getY()][bestLoc.getX()]];
-                    System.out.println("got, from dfs, direction " + moveDir.toString());
+                    //System.out.println("got, from dfs, direction " + moveDir.toString());
                     if (moveDir != Direction.Center && gc.canMove(unit.id(), moveDir)) {
                         doMoveRobot(unit, moveDir);
                         doneMove = true;
@@ -411,7 +411,7 @@ public class Player {
                 tendency.put(unit.id(), rand.nextInt(8));
             } else if (unit.location().isOnMap()) {
                 tendency.put(unit.id(), getDirIndex(unit.location().mapLocation().directionTo(attackLocs.get(attackLocs.size()-1))));
-                System.out.println("Trying to attack enemy starting location!");
+               // System.out.println("Trying to attack enemy starting location!");
             } else {
                 // in garrison or space or something
                 // don't set tendency yet and just return something random

@@ -58,18 +58,18 @@ public class Player {
 
         // MapLocation is a data structure you'll use a lot.
         MapLocation loc = new MapLocation(Planet.Earth, 10, 20);
-        System.out.println("loc: " + loc + ", one step to the Northwest: " + loc.add(Direction.Northwest));
-        System.out.println("loc x: " + loc.getX());
+        //System.out.println("loc: " + loc + ", one step to the Northwest: " + loc.add(Direction.Northwest));
+        //System.out.println("loc x: " + loc.getX());
 
         initialize();
 
-        for (int i = 0; i < 9; i++) {
+        /*for (int i = 0; i < 9; i++) {
             System.out.println("dir " + i + " is " + directions[i].toString());
-        }
+        }*/
 
         // One slightly weird thing: some methods are currently static methods on a static class called bc.
         // This will eventually be fixed :/
-        System.out.println("Opposite of " + Direction.North + ": " + bc.bcDirectionOpposite(Direction.North));
+        //System.out.println("Opposite of " + Direction.North + ": " + bc.bcDirectionOpposite(Direction.North));
 
         while (true) {
             System.out.println("Current round: " + gc.round());
@@ -80,6 +80,7 @@ public class Player {
             // VecUnit is a class that you can think of as similar to ArrayList<Unit>, but immutable.
             for (int i = 0; i < units.size(); i++) {
                 Unit unit = units.get(i);
+                //System.out.println("running " + unit.unitType().toString());
 
                 switch (unit.unitType()) {
                     case Worker:
@@ -247,11 +248,11 @@ public class Player {
         // TODO: limit to 8 workers
         // TODO: only replicate if there is enough money
         // TODO: improve metric of "enough money"
-        System.out.println("ability cooldown = " + unit.abilityCooldown() + ", heat = " + unit.abilityHeat());
+        //System.out.println("ability cooldown = " + unit.abilityCooldown() + ", heat = " + unit.abilityHeat());
         // check we don't have too many workers, and that we have enough money for a factory
         // TODO: make this logic better. e.g. we might need money for a factory in the future
         // TODO: Find out where cost constants are and replay this "100 + 15" with those xd.
-        if (workerCount < 7 && gc.karbonite() > 100 + 15) {
+        if (workerCount < 7 && gc.karbonite() >= 100 + 15) {
             shuffleDirOrder();
             for (int i = 0; i < 8; i++) {
                 if (gc.canReplicate(unit.id(), directions[randDirOrder[i]])) {
@@ -284,19 +285,34 @@ public class Player {
         if (!doneAction) {
             // TODO: make this all directions
             // TODO: make this choose a square with more space
-            Direction dir = directions[rand.nextInt(8)];
-            if (factoriesBeingBuilt.isEmpty() && gc.canBlueprint(unit.id(), UnitType.Factory, dir)) {
-                gc.blueprint(unit.id(), UnitType.Factory, dir);
-                MapLocation loc = unit.location().mapLocation().add(dir);
-                hasFriendlyUnit[loc.getY()][loc.getX()] = true;
-                doneAction = true;
-                doneMovement = true;
-                Unit other = gc.senseUnitAtLocation(loc);
-                //System.out.println("The factory I just built is here: " + other.toString());
-                // TODO: continue this
-                // TODO: store ArrayList of current factory blueprints and implement workers moving towards them
-                // TODO: implement worker replication
-                factoriesBeingBuilt.add(gc.senseUnitAtLocation(loc));
+            if (factoriesBeingBuilt.isEmpty()) {
+                shuffleDirOrder();
+                int best = -1, bestSpace = -1;
+                // Find blueprint direction such that the factory will have the most free space around it
+                for (int i = 0; i < 8; i++) {
+                    if (gc.canBlueprint(unit.id(), UnitType.Factory, directions[randDirOrder[i]])) {
+                        int space = getSpaceAround(unit.location().mapLocation().add(directions[randDirOrder[i]]));
+                        if (space > bestSpace) {
+                            bestSpace = space;
+                            best = i;
+                        }
+                    }
+                }
+                if (best != -1) {
+                    Direction dir = directions[randDirOrder[best]];
+                    System.out.println("blueprinting in direction " + dir.toString() + " with space " + bestSpace);
+                    gc.blueprint(unit.id(), UnitType.Factory, dir);
+                    MapLocation loc = unit.location().mapLocation().add(dir);
+                    hasFriendlyUnit[loc.getY()][loc.getX()] = true;
+                    doneAction = true;
+                    doneMovement = true;
+                    Unit other = gc.senseUnitAtLocation(loc);
+                    //System.out.println("The factory I just built is here: " + other.toString());
+                    // TODO: continue this
+                    // TODO: store ArrayList of current factory blueprints and implement workers moving towards them
+                    // TODO: implement worker replication
+                    factoriesBeingBuilt.add(gc.senseUnitAtLocation(loc));
+                }
             }
         }
 
@@ -329,7 +345,7 @@ public class Player {
             if (bfsClosestKarbonite != null) {
                 Direction dir = directions[bfsDirectionIndexTo[bfsClosestKarbonite.getY()][bfsClosestKarbonite.getX()]];
 
-                System.out.println("worker moving towards minerals!");
+                //System.out.println("worker moving towards minerals!");
                 if (gc.isMoveReady(unit.id()) && gc.canMove(unit.id(), dir)) {
                     doMoveRobot(unit, dir);
                 }
@@ -469,5 +485,25 @@ public class Player {
 
     private static int moveDistance(MapLocation a, MapLocation b) {
         return Math.max(Math.abs(a.getX() - b.getX()), Math.abs(a.getY() - b.getY()));
+    }
+
+    // Required: you must be able to sense every square around loc
+    private static int getSpaceAround(MapLocation loc) {
+        int space = 0;
+        for (int i = 0; i < 8; i++) {
+            MapLocation other = loc.add(directions[i]);
+            // TODO: change hasUnitAtLocation && unit.team == my team to be less dangerous
+            // TODO: because hasFriendlyUnit[][] might be incorrect T_T
+            if (0 <= other.getY() && other.getY() < height && 0 <= other.getX() && other.getX() < width &&
+                    isPassable[other.getY()][other.getX()] &&
+                    !(gc.hasUnitAtLocation(other) && isFriendlyStructure(gc.senseUnitAtLocation(other)))) {
+                space++;
+            }
+        }
+        return space;
+    }
+
+    private static boolean isFriendlyStructure(Unit unit) {
+        return unit.team() == gc.team() && (unit.unitType() == UnitType.Factory || unit.unitType() == UnitType.Rocket);
     }
 }
