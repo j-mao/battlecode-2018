@@ -80,10 +80,20 @@ tags
 
 # Scaffolding files
 LICENSE
-run.bat
+*.bat
 /run.sh
-run_nodocker.bat
-run_nodocker.sh
+/run_nodocker.sh
+/battlecode.sh
+/battlecode-engine
+/battlecode-manager
+/battlecode-maps
+/bindings
+/*Dockerfile
+/.*.yml
+.dockerignore
+Cargo.*
+Makefile
+helpers.mk
 
 # Example funcs players
 examplefuncsplayer-c
