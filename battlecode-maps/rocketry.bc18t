@@ -1,0 +1,91 @@
+seed: 1024
+
+orbit_amplitude: 50
+orbit_period: 40
+orbit_center: 100
+
+EARTH:
+width: 40
+height: 40
+symmetry: vertical
+# can also be horizontal, none
+
+_ =
+x = impassable
+2 = 20k
+r = red_worker
+b = blue_worker
+
+> r_______________________________________
+> ________________________________________
+> ________________________________________
+> ________________________________________
+> ________________________________________
+> ________________________________________
+> ________________________________________
+> ________________________________________
+> ________________________________________
+> ________________________________________
+> ________________________________________
+> ________________________________________
+> xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+> xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+> xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+> xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+> xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+> xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+> xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+> xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+MARS:
+width: 40
+height: 40
+symmetry: none
+
+> 22222xxxxx22222xxxxx22222xxxxx22222xxxxx
+> 22222xxxxx22222xxxxx22222xxxxx22222xxxxx
+> 22222xxxxx22222xxxxx22222xxxxx22222xxxxx
+> 22222xxxxx22222xxxxx22222xxxxx22222xxxxx
+> 22222xxxxx22222xxxxx22222xxxxx22222xxxxx
+> xxxxx22222xxxxx22222xxxxx22222xxxxx22222
+> xxxxx22222xxxxx22222xxxxx22222xxxxx22222
+> xxxxx22222xxxxx22222xxxxx22222xxxxx22222
+> xxxxx22222xxxxx22222xxxxx22222xxxxx22222
+> xxxxx22222xxxxx22222xxxxx22222xxxxx22222
+> 22222xxxxx22222xxxxx22222xxxxx22222xxxxx
+> 22222xxxxx22222xxxxx22222xxxxx22222xxxxx
+> 22222xxxxx22222xxxxx22222xxxxx22222xxxxx
+> 22222xxxxx22222xxxxx22222xxxxx22222xxxxx
+> 22222xxxxx22222xxxxx22222xxxxx22222xxxxx
+> xxxxx22222xxxxx22222xxxxx22222xxxxx22222
+> xxxxx22222xxxxx22222xxxxx22222xxxxx22222
+> xxxxx22222xxxxx22222xxxxx22222xxxxx22222
+> xxxxx22222xxxxx22222xxxxx22222xxxxx22222
+> xxxxx22222xxxxx22222xxxxx22222xxxxx22222
+> 22222xxxxx22222xxxxx22222xxxxx22222xxxxx
+> 22222xxxxx22222xxxxx22222xxxxx22222xxxxx
+> 22222xxxxx22222xxxxx22222xxxxx22222xxxxx
+> 22222xxxxx22222xxxxx22222xxxxx22222xxxxx
+> 22222xxxxx22222xxxxx22222xxxxx22222xxxxx
+> xxxxx22222xxxxx22222xxxxx22222xxxxx22222
+> xxxxx22222xxxxx22222xxxxx22222xxxxx22222
+> xxxxx22222xxxxx22222xxxxx22222xxxxx22222
+> xxxxx22222xxxxx22222xxxxx22222xxxxx22222
+> xxxxx22222xxxxx22222xxxxx22222xxxxx22222
+> 22222xxxxx22222xxxxx22222xxxxx22222xxxxx
+> 22222xxxxx22222xxxxx22222xxxxx22222xxxxx
+> 22222xxxxx22222xxxxx22222xxxxx22222xxxxx
+> 22222xxxxx22222xxxxx22222xxxxx22222xxxxx
+> 22222xxxxx22222xxxxx22222xxxxx22222xxxxx
+> xxxxx22222xxxxx22222xxxxx22222xxxxx22222
+> xxxxx22222xxxxx22222xxxxx22222xxxxx22222
+> xxxxx22222xxxxx22222xxxxx22222xxxxx22222
+> xxxxx22222xxxxx22222xxxxx22222xxxxx22222
+> xxxxx22222xxxxx22222xxxxx22222xxxxx22222
+
+#* 10 24 39 16
+#* 200 2 3 150
+#* 300 10 15 200
+#* 700 5 5 170
+#* 800 5 5 60
+

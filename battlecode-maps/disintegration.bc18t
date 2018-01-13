@@ -1,0 +1,61 @@
+seed: 1024
+
+orbit_amplitude: 50
+orbit_period: 40
+orbit_center: 100
+
+EARTH:
+width: 20
+height: 20
+symmetry: vertical
+# can also be horizontal, none
+
+_ =
+x = impassable
+3 = 35k
+r = red_worker
+b = blue_worker
+J = 1000k
+
+> 33333xxxx3333x___xr_
+> 33333xrrx3333x_xxxx_
+> 33333x_xx3333x______
+> 33333xxxx3333xxxxxxx
+> 33333333333333333333
+> 33333333333333333333
+> 33333333333333333333
+> 33333333333333333333
+> 33333333333333333333
+> 33333333333333333333
+
+MARS:
+width: 20
+height: 20
+symmetry: none
+
+> JJJJJxxxxxJJJJJxxxxx
+> JJJJJxxxxxJJJJJxxxxx
+> JJJJJxxxxxJJJJJxxxxx
+> JJJJJxxxxxJJJJJxxxxx
+> JJJJJxxxxxJJJJJxxxxx
+> xxxxxJJJJJxxxxxJJJJJ
+> xxxxxJJJJJxxxxxJJJJJ
+> xxxxxJJJJJxxxxxJJJJJ
+> xxxxxJJJJJxxxxxJJJJJ
+> xxxxxJJJJJxxxxxJJJJJ
+> JJJJJxxxxxJJJJJxxxxx
+> JJJJJxxxxxJJJJJxxxxx
+> JJJJJxxxxxJJJJJxxxxx
+> JJJJJxxxxxJJJJJxxxxx
+> JJJJJxxxxxJJJJJxxxxx
+> xxxxxJJJJJxxxxxJJJJJ
+> xxxxxJJJJJxxxxxJJJJJ
+> xxxxxJJJJJxxxxxJJJJJ
+> xxxxxJJJJJxxxxxJJJJJ
+> xxxxxJJJJJxxxxxJJJJJ
+
+* 10 24 39 16
+* 200 2 3 150
+* 300 10 15 200
+* 700 5 5 170
+* 800 5 5 60
