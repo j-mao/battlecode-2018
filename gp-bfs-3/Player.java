@@ -38,11 +38,9 @@ public class Player {
     private static boolean bfsSeen[][];
     // which direction you should move to reach each square, according to the bfs
     private static int bfsDirectionIndexTo[][];
-    private static MapLocation bfsClosestKarbonite;
     // to random shuffle the directions
     private static int randDirOrder[];
     // factories that are currently blueprints
-    private static int factoryCount;
     private static ArrayList<Unit> factoriesBeingBuilt = new ArrayList<Unit>();
     private static int workerCount;
 
@@ -118,7 +116,7 @@ public class Player {
         bfsSeen = new boolean[height][width];
         bfsDirectionIndexTo = new int[height][width];
         for (int y = 0; y < height; y++) for (int x = 0; x < width; x++) {
-            //System.out.println("checking if there's passable terrain at " + new MapLocation(gc.planet(), x, y).toString());
+            System.out.println("checking if there's passable terrain at " + new MapLocation(gc.planet(), x, y).toString());
             //System.out.println("is passable at y = " + y + ", x = " + x + " is " + earthMap.isPassableTerrainAt(new MapLocation(gc.planet(), x, y)));
             isPassable[y][x] = earthMap.isPassableTerrainAt(new MapLocation(gc.planet(), x, y)) != 0;
         }
@@ -126,7 +124,7 @@ public class Player {
         for (int i = 0; i < units.size(); i++) {
             Unit unit = units.get(i);
             if (unit.team() != gc.team()) {
-                //System.out.println("Adding attack location " + unit.location().mapLocation().toString());
+                System.out.println("Adding attack location " + unit.location().mapLocation().toString());
                 attackLocs.add(unit.location().mapLocation());
             }
         }
@@ -137,15 +135,11 @@ public class Player {
     }
 
     private static void initTurn(VecUnit myUnits) {
-        factoryCount = 0;
         factoriesBeingBuilt.clear();
         for (int i = 0; i < myUnits.size(); i++) {
             Unit unit = myUnits.get(i);
-            if (unit.unitType() == UnitType.Factory) {
-                factoryCount++;
-                if (unit.structureIsBuilt() == 0) {
-                    factoriesBeingBuilt.add(unit);
-                }
+            if (unit.unitType() == UnitType.Factory && unit.structureIsBuilt() == 0) {
+                factoriesBeingBuilt.add(unit);
             }
         }
         for (int y = 0; y < height; y++) {
@@ -193,8 +187,6 @@ public class Player {
     // store how close you want to get to your destination in howClose (distance = #moves distance, not Euclidean distance)
     // stores the direction you should move to be within howClose of each square
     private static void bfs(MapLocation from, int howClose) {
-        bfsClosestKarbonite = null;
-
         int fromY = from.getY(), fromX = from.getX();
         for (int y = 0; y < height; y++) for (int x = 0; x < width; x++) {
             bfsDirectionIndexTo[y][x] = DirCenterIndex;
@@ -220,10 +212,6 @@ public class Player {
             for (int y = cur.y - howClose; y <= cur.y + howClose; y++) for (int x = cur.x - howClose; x <= cur.x + howClose; x++) {
                 if (0 <= y && y < height && 0 <= x && x < width && bfsDirectionIndexTo[y][x] == DirCenterIndex) {
                     bfsDirectionIndexTo[y][x] = cur.startingDir;
-                    MapLocation loc = new MapLocation(gc.planet(), x, y);
-                    if (bfsClosestKarbonite == null && gc.canSenseLocation(loc) && gc.karboniteAt(loc) > 0) {
-                        bfsClosestKarbonite = loc;
-                    }
                 }
             }
 
@@ -251,7 +239,7 @@ public class Player {
         // check we don't have too many workers, and that we have enough money for a factory
         // TODO: make this logic better. e.g. we might need money for a factory in the future
         // TODO: Find out where cost constants are and replay this "100 + 15" with those xd.
-        if (workerCount < 7 && gc.karbonite() > 100 + 15) {
+        if (workerCount < 8 && gc.karbonite() > 100 + 15) {
             shuffleDirOrder();
             for (int i = 0; i < 8; i++) {
                 if (gc.canReplicate(unit.id(), directions[randDirOrder[i]])) {
@@ -282,8 +270,6 @@ public class Player {
 
         // try to blueprint
         if (!doneAction) {
-            // TODO: make this all directions
-            // TODO: make this choose a square with more space
             Direction dir = directions[rand.nextInt(8)];
             if (factoriesBeingBuilt.isEmpty() && gc.canBlueprint(unit.id(), UnitType.Factory, dir)) {
                 gc.blueprint(unit.id(), UnitType.Factory, dir);
@@ -292,7 +278,7 @@ public class Player {
                 doneAction = true;
                 doneMovement = true;
                 Unit other = gc.senseUnitAtLocation(loc);
-                //System.out.println("The factory I just built is here: " + other.toString());
+                System.out.println("The factory I just built is here: " + other.toString());
                 // TODO: continue this
                 // TODO: store ArrayList of current factory blueprints and implement workers moving towards them
                 // TODO: implement worker replication
@@ -300,8 +286,8 @@ public class Player {
             }
         }
 
-        // if there is a factory blueprint somewhere, and you have less than 3 complete factories, try to move towards it to help build it
-        if (!doneMovement && !factoriesBeingBuilt.isEmpty() && factoryCount - factoriesBeingBuilt.size() < 3) {
+        // if there is a factory blueprint somewhere, try to move towards it to help build it
+        if (!doneMovement && !factoriesBeingBuilt.isEmpty()) {
             // set done to true so we don't move randomly
             doneMovement = true;
 
@@ -312,27 +298,10 @@ public class Player {
             Unit factory = factoriesBeingBuilt.get(0);
             MapLocation loc = factory.location().mapLocation();
             Direction dir = directions[bfsDirectionIndexTo[loc.getY()][loc.getX()]];
-            //System.out.println("worker moving to factory in dir " + dir.toString());
+            System.out.println("worker moving to factory in dir " + dir.toString());
 
             if (gc.isMoveReady(unit.id()) && gc.canMove(unit.id(), dir)) {
                 doMoveRobot(unit, dir);
-            }
-        }
-
-        // otherwise, if you have 3 complete factories, try to move towards minerals
-        // TODO: make this >= 3 thing better
-        // TODO: ie make it not horrible in special case maps LuL
-        if (!doneMovement && factoryCount - factoriesBeingBuilt.size() >= 3) {
-            // TODO: unify bfs logic so that you don't unnecessarily call it multiple times
-            bfs(unit.location().mapLocation(), 1);
-
-            if (bfsClosestKarbonite != null) {
-                Direction dir = directions[bfsDirectionIndexTo[bfsClosestKarbonite.getY()][bfsClosestKarbonite.getX()]];
-
-                System.out.println("worker moving towards minerals!");
-                if (gc.isMoveReady(unit.id()) && gc.canMove(unit.id(), dir)) {
-                    doMoveRobot(unit, dir);
-                }
             }
         }
 
@@ -349,7 +318,7 @@ public class Player {
         if (!doneAction) {
             for (int i = 0; i < 9; i++) {
                 if (gc.canHarvest(unit.id(), directions[i])) {
-                    //System.out.println("harvesting!");
+                    System.out.println("harvesting!");
                     gc.harvest(unit.id(), directions[i]);
                 }
             }
@@ -358,7 +327,7 @@ public class Player {
 
     private static void runFactory(Unit unit) {
         if (gc.canProduceRobot(unit.id(), UnitType.Ranger)) {
-            //System.out.println("PRODUCING ROBOT!!!");
+            System.out.println("PRODUCING ROBOT!!!");
             gc.produceRobot(unit.id(), UnitType.Ranger);
         }
 
@@ -414,10 +383,10 @@ public class Player {
                             bestLoc = attackLocs.get(i);
                         }
                     }
-                    //System.out.println("doing bfs");
+                    System.out.println("doing bfs");
                     bfs(unit.location().mapLocation(), 0);
                     moveDir = directions[bfsDirectionIndexTo[bestLoc.getY()][bestLoc.getX()]];
-                    //System.out.println("got, from dfs, direction " + moveDir.toString());
+                    System.out.println("got, from dfs, direction " + moveDir.toString());
                     if (moveDir != Direction.Center && gc.canMove(unit.id(), moveDir)) {
                         doMoveRobot(unit, moveDir);
                         doneMove = true;
@@ -442,7 +411,7 @@ public class Player {
                 tendency.put(unit.id(), rand.nextInt(8));
             } else if (unit.location().isOnMap()) {
                 tendency.put(unit.id(), getDirIndex(unit.location().mapLocation().directionTo(attackLocs.get(attackLocs.size()-1))));
-                //System.out.println("Trying to attack enemy starting location!");
+                System.out.println("Trying to attack enemy starting location!");
             } else {
                 // in garrison or space or something
                 // don't set tendency yet and just return something random
