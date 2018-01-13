@@ -119,7 +119,7 @@ public class Player {
 
             while (!allMyUnits.isEmpty()) {
                 Unit unit = allMyUnits.remove();
-                System.out.println("running " + unit.unitType().toString());
+                //System.out.println("running " + unit.unitType().toString());
 
                 switch (unit.unitType()) {
                     case Worker:
@@ -322,6 +322,7 @@ public class Player {
                 gc.replicate(unit.id(), replicateDir);
                 // TODO: add created units to units list so they can do something immediately on the turn they're created
                 MapLocation loc = unit.location().mapLocation().add(replicateDir);
+                allMyUnits.add(gc.senseUnitAtLocation(loc));
                 hasFriendlyUnit[loc.getY()][loc.getX()] = true;
                 // TODO: test on a rectangular map to make sure I didn't mess up any y, x orders anywhere
                 doneAction = true;
@@ -335,6 +336,22 @@ public class Player {
                 Unit other = units.get(i);
                 if (other.unitType() == UnitType.Factory && gc.canBuild(unit.id(), other.id())) {
                     gc.build(unit.id(), other.id());
+                    // If it's complete, remove it from the factoriesBeingBuilt list
+                    // need to re-sense the unit to get the updated structureIsBuilt() value
+                    if (gc.senseUnitAtLocation(other.location().mapLocation()).structureIsBuilt() != 0) {
+                        //System.out.println("Finished a factory!");
+                        boolean foundIt = false;
+                        for (int j = 0; j < factoriesBeingBuilt.size(); j++) {
+                            if (factoriesBeingBuilt.get(j).location().mapLocation().equals(other.location().mapLocation())) {
+                                factoriesBeingBuilt.remove(j);
+                                foundIt = true;
+                                break;
+                            }
+                        }
+                        if (!foundIt) {
+                            System.out.println("ERROR: Factory was expected in factoriesBeingBuilt, but was missing!");
+                        }
+                    }
                     doneAction = true;
                     doneMovement = true;
                     break;
@@ -373,6 +390,8 @@ public class Player {
                     // TODO: store ArrayList of current factory blueprints and implement workers moving towards them
                     // TODO: implement worker replication
                     factoriesBeingBuilt.add(gc.senseUnitAtLocation(loc));
+                    // TODO: add this factory to allMyUnits list?
+                    // TODO: or maybe not because it's not going to do anything anyway? (unless it does some calculation or something)
                 }
             }
         }
@@ -452,6 +471,7 @@ public class Player {
                 gc.unload(unit.id(), unloadDir);
                 MapLocation loc = unit.location().mapLocation().add(unloadDir);
                 hasFriendlyUnit[loc.getY()][loc.getX()] = true;
+                allMyUnits.add(gc.senseUnitAtLocation(loc));
                 // TODO: check everywhere else to make sure hasFriendlyUnits[][] is being correctly maintained.
             }
         }
