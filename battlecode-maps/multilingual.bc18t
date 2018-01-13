@@ -1,0 +1,137 @@
+# an example text-format map.
+# text-format maps have the extension .bc18t, instead of .bc18map which is used by JSON format maps;
+# if you copy this file, save it as .bc18t, not .bc18map.
+# this is a comment.
+
+# random seed
+seed: 1024
+
+# orbit settings
+# a rocket launched on round n will take:
+# sin(n * 2pi/period) * amplitude + center
+# rounds to reach Mars
+orbit_amplitude: 50
+orbit_period: 40
+orbit_center: 100
+
+EARTH:
+width: 40
+height: 40
+symmetry: vertical
+# can also be horizontal, none
+
+
+# now the actual map-defining part
+# we make a big square of tiles (see below).
+# we define what tiles we want here
+
+# the empty tile
+_ =
+# a non-passable tile
+x = impassable
+# varying amounts of karbonite
+Q = 100k
+1 = 10k
+2 = 20k
+3 = 35k
+4 = 70k
+# note: the numbers are just convenient shorthand; you can change the amount of karbonite they refer to
+
+# can place workers
+r = red_worker
+b = blue_worker
+
+# workers can also have karbonite on their square
+
+# now we draw a map!
+# every line of a map must start with ">"
+# use the symbols you defined above to lay out the map
+
+>_2_2_2_2_2_2_2_2_2_2_2_2_2_2_2_2_2_2_2_2
+>1_1_1_1_1_1_1_1_1_1_1_1_1_1_1_1_1_1_1_1_
+>111xxxxxx2_2_xxxx____x_____x_____xxxx___
+>__1xxxxxx_1_1xxxx____x_____x_____xxxx___
+>_1__1113x2_2_x__x____x11111x_____x__x___
+>__1_____x_1_1x__x____x1___1x__Q__x__x___
+>_1______x2_2_x__x____x1_r_1x__Q__x__x___
+>__1_____x_1_1x__x____x1___1x__Q__x__x___
+>_1______x2_2_x__x____x11111x_____x__x___
+>__1_____x_1_xx__xx___x_____x____xx__xx__
+>___r____x2_2xx__xx___xx1_1xx____xx__xx__
+>________x_1_xxxxxx____x111x_____xxxxxx__
+>________x2_2xx__xx_111xx1xx_111_xx__xx_r
+>________x_1_x____x_121_x2x__121_x____x__
+>________x2_2x____x_131_x3x__131_x____x__
+>___xx___x_1_x_44_x_141_x4x__121_x____x__
+>QQQxxQQQx2_2x____x_131__x___111_x_44_x__
+>QQQxxQQQx_1xx_22_xx121_________x__22_xxQ
+>QQQxxQQQx2_xx____xx111_QQQ_____xx____xxx
+>xxxxxxxxxxx__xxxxxxxxx_Q4Q_xxxxxxxxxxx_x
+
+# that's only 10 lines long; since we set symmetry:vertical, the rest of the map will be filled in
+# automatically. Unit teams will be swapped in the upside-down part of the map.
+
+MARS:
+width: 40
+height: 40
+symmetry: none
+
+# symbols carry over from above
+# can define more if we want
+J = 1000k
+
+# spaces aren't needed
+>xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+>x______________________________________x
+>x______________________________________x
+>x______________________________________x
+>x___xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+>x___xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+>x___xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+>x___xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+>x___xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+>x___xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+>x___xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+>x___xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+>x___xxxxxxxxxxx__xxxxxxxxxxx__xxxxxxxxxx
+>x___xxxxxxxxxxx__xxxxxxxxxxx__xxxxxxxxxx
+>x___xxxxxxxxxxx__xxxxxxxxxxx__xxxxxxxxxx
+>x___xxxxxxxxxxx__xxxxxxxxxxx__xxxxxxxxxx
+>x___xxxxxxxxxxx__xxxxxxxxxxx__xxxxxxxxxx
+>x___xxxxxxxxxxx__xxxxxxxxxxx__xxxxxxxxxx
+>x___xxxxxxxxxxx__xxxxxxxxxxx__xxxxxxxxxx
+>x___xxxxxxxx________xxxxx________xxxxxxx
+>x___xxxxxxxx________xxxxx________xxxxxxx
+>x___xxxxxxxxxxx__xxxxxxxxxxx__xxxxxxxxxx
+>x___xxxxxxxxxxx__xxxxxxxxxxx__xxxxxxxxxx
+>x___xxxxxxxxxxx__xxxxxxxxxxx__xxxxxxxxxx
+>x___xxxxxxxxxxx__xxxxxxxxxxx__xxxxxxxxxx
+>x___xxxxxxxxxxx__xxxxxxxxxxx__xxxxxxxxxx
+>x___xxxxxxxxxxx__xxxxxxxxxxx__xxxxxxxxxx
+>x___xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+>x___xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+>x___xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+>x___xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+>x___xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+>x___xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+>x___xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+>x___xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+>x___xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+>x______________________________________x
+>x______________________________________x
+>x______________________________________x
+>xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+# pro tip: if you're using vim keybindings, try selecting somewhere on that map and typing ctrl-v kkjjjjrx 
+
+# asteroids:
+# * round x y karbonite
+# note that y starts at 0 at the bottom of the map
+# all asteroids land on mars
+
+* 10 24 39 16
+* 200 2 3 150
+* 300 10 15 200
+* 700 5 5 170
+* 800 5 5 60
+
