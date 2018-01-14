@@ -74,6 +74,7 @@ public class Player {
     // which direction you should move to reach each square, according to the bfs
     private static int bfsDirectionIndexTo[][];
     private static MapLocation bfsClosestKarbonite;
+    private static MapLocation bfsClosestEnemy;
     // to random shuffle the directions
     private static int randDirOrder[];
     // factories that are currently blueprints
@@ -110,8 +111,8 @@ public class Player {
         // This will eventually be fixed :/
         //System.out.println("Opposite of " + Direction.North + ": " + bc.bcDirectionOpposite(Direction.North));
 
-        gc.queueResearch(UnitType.Ranger);
         gc.queueResearch(UnitType.Worker);
+        gc.queueResearch(UnitType.Ranger);
         gc.queueResearch(UnitType.Ranger);
         gc.queueResearch(UnitType.Rocket);
         gc.queueResearch(UnitType.Rocket);
@@ -137,6 +138,12 @@ public class Player {
                         break;
                     case Ranger:
                         runRanger(unit);
+                        break;
+                    case Knight:
+                        runKnight(unit);
+                        break;
+                    case Healer:
+                        runHealer(unit);
                         break;
                 }
             }
@@ -243,9 +250,12 @@ public class Player {
 
     // bfs to all squares
     // store how close you want to get to your destination in howClose (distance = #moves distance, not Euclidean distance)
+    // stores bfsClosestKarbonite: closest location which gets you within howClose of karbonite
+    // stores bfsClosestEnemy: closest location which is within howClose of an enemy
     // stores the direction you should move to be within howClose of each square
     private static void bfs(MapLocation from, int howClose) {
         bfsClosestKarbonite = null;
+        bfsClosestEnemy = null;
 
         int fromY = from.getY(), fromX = from.getX();
         for (int y = 0; y < height; y++) for (int x = 0; x < width; x++) {
@@ -273,8 +283,16 @@ public class Player {
                 if (0 <= y && y < height && 0 <= x && x < width && bfsDirectionIndexTo[y][x] == DirCenterIndex) {
                     bfsDirectionIndexTo[y][x] = cur.startingDir;
                     MapLocation loc = new MapLocation(gc.planet(), x, y);
-                    if (bfsClosestKarbonite == null && gc.canSenseLocation(loc) && gc.karboniteAt(loc) > 0) {
-                        bfsClosestKarbonite = loc;
+                    if (gc.canSenseLocation(loc)) {
+                        if (bfsClosestKarbonite == null && gc.karboniteAt(loc) > 0) {
+                            bfsClosestKarbonite = loc;
+                        }
+                        if (bfsClosestEnemy == null &&
+                                loc.distanceSquaredTo(new MapLocation(gc.planet(), cur.x, cur.y)) <= howClose &&
+                                gc.hasUnitAtLocation(loc) &&
+                                gc.senseUnitAtLocation(loc).team() != gc.team()) {
+                            bfsClosestEnemy = loc;
+                        }
                     }
                 }
             }
@@ -500,51 +518,73 @@ public class Player {
             }
         }
 
-        if (unit.location().isOnMap()) {
-            for (int i = attackLocs.size()-1; i >= 0; i--) {
-                if (attackLocs.get(i).equals(unit.location().mapLocation())) {
-                    attackLocs.remove(i);
-                }
-            }
-        }
+        removeCompletedAttackLocs(unit);
 
         if (doMove) {
             if (unit.location().isOnMap() && gc.isMoveReady(unit.id())) {
                 boolean doneMove = false;
-                Direction moveDir;
-                if (!attackLocs.isEmpty()) {
-                    // find closest out of the potential attackable locations
-                    // TODO: change this to bfs distance so it's less horrible xd
-                    // TODO: once changed to bfs, make sure you don't do too many bfs's and time out
-                    // TODO: actually you can just do one bfs LuL
-                    // TODO: make the bfs result function more smooth over time
-                    MapLocation bestLoc = attackLocs.get(0);
-                    for (int i = 1; i < attackLocs.size(); i++) {
-                        if (moveDistance(unit.location().mapLocation(), attackLocs.get(i)) <
-                                moveDistance(unit.location().mapLocation(), bestLoc)) {
-                            bestLoc = attackLocs.get(i);
-                        }
-                    }
-                    //System.out.println("doing bfs");
-                    bfs(unit.location().mapLocation(), 0);
-                    moveDir = directions[bfsDirectionIndexTo[bestLoc.getY()][bestLoc.getX()]];
-                    //System.out.println("got, from dfs, direction " + moveDir.toString());
-                    if (moveDir != Direction.Center && gc.canMove(unit.id(), moveDir)) {
-                        doMoveRobot(unit, moveDir);
-                        doneMove = true;
-                    }
+                bfs(unit.location().mapLocation(), 1);
+                if (!doneMove && moveToAttackLocsYouMustCallBfsWithHowCloseSetTo1BeforeCallingThis(unit)) {
+                    doneMove = true;
                 }
                 if (!doneMove) {
-                    moveDir = directions[getTendency(unit)];
-                    if (gc.canMove(unit.id(), moveDir)) {
-                        doMoveRobot(unit, moveDir);
-                        updateTendency(unit.id(), 6);
-                    } else {
-                        updateTendency(unit.id(), 100);
+                    moveToTendency(unit);
+                }
+            }
+        }
+    }
+
+    private static void runKnight(Unit unit) {
+        boolean doneMove = false;
+
+        if (unit.location().isOnMap()) {
+            VecUnit units = gc.senseNearbyUnits(unit.location().mapLocation(), unit.attackRange());
+            for (int i = 0; i < units.size(); i++) {
+                Unit other = units.get(i);
+                if (other.team() != unit.team() && gc.canAttack(unit.id(), other.id())) {
+                    doneMove = true;
+                    if (gc.isAttackReady(unit.id())) {
+                        gc.attack(unit.id(), other.id());
                     }
                 }
             }
         }
+
+        removeCompletedAttackLocs(unit);
+
+        if (!doneMove && unit.location().isOnMap() && gc.isMoveReady(unit.id())) {
+            bfs(unit.location().mapLocation(), 1);
+
+            if (!doneMove) {
+                // try to move towards closest enemy unit
+                // If the closest enemy is within some arbitrary distance, attack them
+                // Currently set to ranger attack range
+                // Warning: Constant used that might change!
+                if (bfsClosestEnemy != null && unit.location().mapLocation().distanceSquaredTo(bfsClosestEnemy) <= 50) {
+                    System.out.println("My location = " + unit.location().mapLocation().toString() + ", closest enemy loc = " + bfsClosestEnemy.toString());
+                    doneMove = true;
+                    Direction dir = directions[bfsDirectionIndexTo[bfsClosestEnemy.getY()][bfsClosestEnemy.getX()]];
+                    if (gc.canMove(unit.id(), dir)) {
+                        doMoveRobot(unit, dir);
+                    }
+                }
+            }
+
+            if (!doneMove) {
+                // try to move to attack location
+                if (moveToAttackLocsYouMustCallBfsWithHowCloseSetTo1BeforeCallingThis(unit)) {
+                    doneMove = true;
+                }
+            }
+
+            if (!doneMove) {
+                // move to tendency
+                moveToTendency(unit);
+            }
+        }
+    }
+
+    private static void runHealer(Unit unit) {
     }
 
     private static int getTendency(Unit unit) {
@@ -614,5 +654,51 @@ public class Player {
             }
         }
         return false;
+    }
+
+    private static void removeCompletedAttackLocs(Unit unit) {
+        if (unit.location().isOnMap()) {
+            for (int i = attackLocs.size()-1; i >= 0; i--) {
+                if (moveDistance(attackLocs.get(i), unit.location().mapLocation()) <= 1) {
+                    attackLocs.remove(i);
+                }
+            }
+        }
+    }
+
+    private static boolean moveToAttackLocsYouMustCallBfsWithHowCloseSetTo1BeforeCallingThis(Unit unit) {
+        if (attackLocs.isEmpty()) {
+            return false;
+        }
+        // find closest out of the potential attackable locations
+        // TODO: change this to bfs distance so it's less horrible xd
+        // TODO: once changed to bfs, make sure you don't do too many bfs's and time out
+        // TODO: actually you can just do one bfs LuL
+        // TODO: make the bfs result function more smooth over time
+        MapLocation bestLoc = attackLocs.get(0);
+        for (int i = 1; i < attackLocs.size(); i++) {
+            if (moveDistance(unit.location().mapLocation(), attackLocs.get(i)) <
+                    moveDistance(unit.location().mapLocation(), bestLoc)) {
+                bestLoc = attackLocs.get(i);
+            }
+        }
+        //System.out.println("doing bfs");
+        Direction moveDir = directions[bfsDirectionIndexTo[bestLoc.getY()][bestLoc.getX()]];
+        //System.out.println("got, from dfs, direction " + moveDir.toString());
+        if (moveDir != Direction.Center && gc.canMove(unit.id(), moveDir)) {
+            doMoveRobot(unit, moveDir);
+            return true;
+        }
+        return false;
+    }
+
+    private static void moveToTendency(Unit unit) {
+        Direction moveDir = directions[getTendency(unit)];
+        if (gc.canMove(unit.id(), moveDir)) {
+            doMoveRobot(unit, moveDir);
+            updateTendency(unit.id(), 6);
+        } else {
+            updateTendency(unit.id(), 100);
+        }
     }
 }
