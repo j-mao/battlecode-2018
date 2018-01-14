@@ -86,7 +86,7 @@ public class Player {
     // immediately.
     public static Comparator<Unit> unitOrderComparator = new UnitOrderComparator();
     public static PriorityQueue<Unit> allMyUnits = new PriorityQueue<Unit>(5, unitOrderComparator);
-    
+
     // (Currently not used! Just ignore this xd)
     // Map of how long ago an enemy ranger was seen at some square
     // Stores -1 if a ranger was not seen at that square the last time you were able to sense it (or if you can currently
@@ -577,6 +577,18 @@ public class Player {
         if (doMove) {
             if (unit.location().isOnMap() && gc.isMoveReady(unit.id())) {
                 boolean doneMove = false;
+
+                // check if current location is good position
+                if (!doneMove) {
+                    int y = unit.location().mapLocation().getY();
+                    int x = unit.location().mapLocation().getX();
+                    if (isGoodPosition[y][x] && !isGoodPositionTaken[y][x]) {
+                        isGoodPositionTaken[y][x] = true;
+                        doneMove = true;
+                    }
+                }
+
+                // otherwise, try to move to good position
                 bfs(unit.location().mapLocation(), 0);
                 if (!doneMove && bfsClosestFreeGoodPosition != null) {
                     int y = bfsClosestFreeGoodPosition.getY();
@@ -588,6 +600,8 @@ public class Player {
                     }
                     doneMove = true;
                 }
+
+                // otherwise move to attack loc
                 bfs(unit.location().mapLocation(), 1);
                 if (!doneMove && moveToAttackLocsYouMustCallBfsWithHowCloseSetTo1BeforeCallingThis(unit)) {
                     doneMove = true;
