@@ -81,7 +81,7 @@ tags
 # Scaffolding files
 LICENSE
 *.bat
-/run.sh
+**/run.sh
 /run_nodocker.sh
 /battlecode.sh
 /battlecode-engine
