@@ -110,6 +110,13 @@ public class Player {
         // This will eventually be fixed :/
         //System.out.println("Opposite of " + Direction.North + ": " + bc.bcDirectionOpposite(Direction.North));
 
+        gc.queueResearch(UnitType.Ranger);
+        gc.queueResearch(UnitType.Worker);
+        gc.queueResearch(UnitType.Ranger);
+        gc.queueResearch(UnitType.Rocket);
+        gc.queueResearch(UnitType.Rocket);
+        gc.queueResearch(UnitType.Rocket);
+
         while (true) {
             System.out.println("Current round: " + gc.round());
 
