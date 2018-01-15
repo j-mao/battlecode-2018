@@ -459,31 +459,6 @@ public class UniverseController extends MovementModule {
 		return true;
 	}
 
-	static void tryMoveAttacker (Unit unit) throws Exception
-	{
-		if (gc.senseNearbyUnitsByTeam(unit.location().mapLocation(), unit.attackRange(), enemyTeam).size() > 0) {
-			return;
-		}
-
-		if (gc.isMoveReady(unit.id())) {
-			Direction prefer = unit.location().mapLocation().directionTo(lastSeenEnemy);
-			for (int i = 0;i < 4;i++)
-			{
-				Direction d = Direction.swigToEnum((prefer.swigValue()+i)%8);
-				if (gc.canMove(unit.id(), d))
-				{
-					doMoveRobot(unit, d);
-					break;
-				}
-				d = Direction.swigToEnum((prefer.swigValue()+8-i)%8);
-				if (gc.canMove(unit.id(), d)) {
-					doMoveRobot(unit, d);
-					break;
-				}
-			}
-		}
-	}
-
 	static int attackPriority(UnitType u)
 	{
 		if (u == UnitType.Ranger) return 10;
