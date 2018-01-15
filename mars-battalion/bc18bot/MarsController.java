@@ -119,10 +119,10 @@ public class MarsController extends UniverseController
 		{
 			if (!units.get(i).location().isInGarrison() && !units.get(i).location().isInSpace()) {
 				if (units.get(i).unitType() == UnitType.Ranger) {
-					if (!battalion.containsKey(units.get(i).id()))
+					if (!battalion.containsKey(units.get(i).id())) // unassigned
 					{
 						freeAgents.add(units.get(i));
-					} else if (!battalionLeaders.contains(battalion.get(units.get(i).id())))
+					} else if (!battalionLeaders.contains(battalion.get(units.get(i).id()))) // leader doesnt exist
 					{
 						freeAgents.add(units.get(i));
 					}
@@ -165,9 +165,19 @@ public class MarsController extends UniverseController
 
 		computeBattalionSizes();
 
+		/*
+		// report battalion list
+		System.out.print("Round "+roundNum+":");
+		for (Map.Entry<Integer, Integer> option: battalionSizes.entrySet())
+		{
+			System.out.printf(" [leader %d size %d]", option.getKey(), option.getValue());
+		}
+		System.out.println();
+		*/
+
 		// split battalions that are too big
-		int optimalBattalionQty = Math.max(1, Math.min(6, numunits/15-1)); // feel free to change this
-		while (battalionLeaders.size() > optimalBattalionQty)
+		int optimalBattalionQty = Math.max(1, Math.min(6, numunits/8-1)); // feel free to change this
+		if (battalionLeaders.size() > 0) while (battalionLeaders.size() < optimalBattalionQty)
 		{
 			// take the largest battalion
 			Integer which = null, magnitude = null;
@@ -177,7 +187,7 @@ public class MarsController extends UniverseController
 				{
 					which = option.getKey();
 					magnitude = option.getValue();
-				} else if (option.getValue() > magnitude)
+				} else if (option.getValue().intValue() > magnitude.intValue())
 				{
 					which = option.getKey();
 					magnitude = option.getValue();
@@ -193,7 +203,7 @@ public class MarsController extends UniverseController
 			ArrayList<Integer> members = new ArrayList<Integer>();
 			for (Map.Entry<Integer, Integer> option: battalion.entrySet())
 			{
-				if (option.getValue() == which)
+				if (option.getValue().equals(which))
 				{
 					members.add(option.getKey());
 				}
@@ -231,6 +241,7 @@ public class MarsController extends UniverseController
 			}
 
 			// move the "pack"
+			// Option 1: go to attack location if possible
 			boolean doneMove = false;
 			if (!attackLocs.isEmpty()) {
 				// find closest out of the potential attackable locations
@@ -253,6 +264,14 @@ public class MarsController extends UniverseController
 				for (Boolean i: result) if (i)
 					doneMove = true;
 			}
+			// Option 2: go towards the leader if possible
+			if (!doneMove) {
+				bfs(gc.unit(battalionLeader).location().mapLocation(), 0);
+				ArrayList<Boolean> result = tryMovePackOfRobots(members);
+				for (Boolean i: result) if (i)
+					doneMove = true;
+			}
+			// Option 3: move according to the leader's tendency
 			if (!doneMove) {
 				Direction moveDir = directions[getTendency(gc.unit(battalionLeader))];
 				ArrayList<Boolean> result = tryMovePackOfRobots(members, moveDir);

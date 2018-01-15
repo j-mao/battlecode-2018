@@ -83,17 +83,26 @@ public class UniverseController extends MovementModule {
 				if (gc.isMoveReady(myId))
 				{
 					shuffleDirOrder();
+					Direction best = null; int closest = 100000;
 					for (int d = 0;d < 8;d++)
 					{
 						int ny = where.getY() + dy[randDirOrder[d]];
 						int nx = where.getX() + dx[randDirOrder[d]];
-						if (0 <= ny && ny < height && 0 <= nx && nx < width && bfsDist[ny][nx] < bfsDist[where.getY()][where.getX()] && gc.canMove(myId, directions[randDirOrder[d]]))
+						if (0 <= ny && ny < height && 0 <= nx && nx < width)
 						{
-							doMoveRobot(gc.unit(myId), directions[randDirOrder[d]]);
-							result.set(i, true);
-							didSomething = true;
-							break;
+							int alt = bfsDist[ny][nx];
+							if (alt < closest)
+							{
+								best = directions[randDirOrder[d]];
+								closest = alt;
+							}
 						}
+					}
+					if (best != null && gc.canMove(myId, best))
+					{
+						doMoveRobot(gc.unit(myId), best);
+						result.set(i, true);
+						didSomething = true;
 					}
 				}
 			}
