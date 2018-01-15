@@ -555,9 +555,16 @@ public class Player {
     }
 
     private static void runFactory(Unit unit) {
-        if (gc.canProduceRobot(unit.id(), UnitType.Ranger)) {
+
+        UnitType toProduce = UnitType.Ranger;
+
+        if (numWorkers == 0) {
+            toProduce = UnitType.Worker;
+        }
+
+        if (gc.canProduceRobot(unit.id(), toProduce)) {
             //System.out.println("PRODUCING ROBOT!!!");
-            gc.produceRobot(unit.id(), UnitType.Ranger);
+            gc.produceRobot(unit.id(), toProduce);
         }
 
         for (int j = 0; j < 8; j++) {
