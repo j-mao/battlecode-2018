@@ -98,6 +98,15 @@ public class UniverseController
 				e.printStackTrace();
 				System.out.println("========================================");
 				System.out.println();
+			} catch (UnknownError e)
+			{
+				// There used to be GameActionExceptions for whenever you tried to do something retarded
+				// But that doesn't seem to exist this year
+				System.out.println("========================================");
+				System.out.println("An exception was thrown [Planet "+myPlanet.swigValue()+", round "+roundNum+"]");
+				e.printStackTrace();
+				System.out.println("========================================");
+				System.out.println();
 			} finally
 			{
 				// stuff to do at end of turn
