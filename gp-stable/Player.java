@@ -12,10 +12,10 @@ import java.util.Comparator;
 
 public class Player {
 
-    private static int dy[] = {1,1,0,-1,-1,-1,0,1,0};
-    private static int dx[] = {0,1,1,1,0,-1,-1,-1,0};
+    public static int dy[] = {1,1,0,-1,-1,-1,0,1,0};
+    public static int dx[] = {0,1,1,1,0,-1,-1,-1,0};
 
-    private static int DirCenterIndex = 8; // index 8 corresponds to Direction.Center
+    public static int DirCenterIndex = 8; // index 8 corresponds to Direction.Center
 
     static class BfsState {
         public int y, x, startingDir;
@@ -29,7 +29,7 @@ public class Player {
 
     // from https://stackoverflow.com/questions/683041/how-do-i-use-a-priorityqueue
     // LuL not knowing how to use java in 2018 LuL
-    private static class UnitOrderComparator implements Comparator<Unit>
+    public static class UnitOrderComparator implements Comparator<Unit>
     {
         @Override
         public int compare(Unit x, Unit y)
@@ -40,7 +40,7 @@ public class Player {
         }
     }
 
-    private static int getUnitOrderPriority(UnitType unitType) {
+    public static int getUnitOrderPriority(UnitType unitType) {
         switch(unitType) {
             // Actually not sure whether fighting units or workers should go first... so just use the same priority...
             case Ranger:
@@ -60,31 +60,53 @@ public class Player {
         return 9999;
     }
 
-    private static GameController gc = new GameController();
-    private static Random rand = new Random();
+    public static GameController gc = new GameController();
+    public static Random rand = new Random();
     // Direction is a normal java enum.
-    private static Direction[] directions = Direction.values();
-    private static Map<Integer, Integer> tendency = new HashMap<Integer, Integer>();
-    private static ArrayList<MapLocation> attackLocs = new ArrayList<MapLocation>();
-    private static int width, height;
-    private static boolean isPassable[][];
-    private static boolean hasFriendlyUnit[][];
+    public static Direction[] directions = Direction.values();
+    public static Map<Integer, Integer> tendency = new HashMap<Integer, Integer>();
+    public static ArrayList<MapLocation> attackLocs = new ArrayList<MapLocation>();
+    public static int width, height;
+    public static boolean isPassable[][];
+    public static boolean hasFriendlyUnit[][];
     // temporary seen array
-    private static boolean bfsSeen[][];
+    public static boolean bfsSeen[][];
     // which direction you should move to reach each square, according to the bfs
-    private static int bfsDirectionIndexTo[][];
-    private static MapLocation bfsClosestKarbonite;
-    private static MapLocation bfsClosestEnemy;
+    public static int bfsDirectionIndexTo[][];
+    public static MapLocation bfsClosestKarbonite;
+    public static MapLocation bfsClosestEnemy;
+    public static MapLocation bfsClosestFreeGoodPosition;
     // to random shuffle the directions
-    private static int randDirOrder[];
+    public static int randDirOrder[];
     // factories that are currently blueprints
-    private static int factoryCount;
-    private static ArrayList<Unit> factoriesBeingBuilt = new ArrayList<Unit>();
-    private static int workerCount;
+    public static int factoryCount;
+    public static ArrayList<Unit> factoriesBeingBuilt = new ArrayList<Unit>();
+    public static int workerCount;
     // Store this list of all our units ourselves, so that we can add to it when we create units and use those new units
     // immediately.
-    private static Comparator<Unit> unitOrderComparator = new UnitOrderComparator();
-    private static PriorityQueue<Unit> allMyUnits = new PriorityQueue<Unit>(5, unitOrderComparator);
+    public static Comparator<Unit> unitOrderComparator = new UnitOrderComparator();
+    public static PriorityQueue<Unit> allMyUnits = new PriorityQueue<Unit>(5, unitOrderComparator);
+
+    // (Currently not used! Just ignore this xd)
+    // Map of how long ago an enemy ranger was seen at some square
+    // Stores -1 if a ranger was not seen at that square the last time you were able to sense it (or if you can currently
+    //   sense it and there's not a ranger there.
+    // Otherwise stores number of turns since last sighting, 0 if you can see one this turn.
+    // TODO: do we need this?
+    //public static int enemyRangerSeenWhen[][];
+
+    // Map of euclidean distance of each square to closest enemy
+    // Only guaranteed to be calculated up to a maximum distance of 100, otherwise the distance could be correct, or
+    // could be set to some large value (e.g. 9999)
+    // TODO: Warning: Constants
+    // TODO: change this if constants change
+    public static int attackDistanceToEnemy[][];
+    // good positions are squares which are some distance from the enemy.
+    // e.g. distance [51, 72] from the closest enemy (this might be changed later...)
+    // if units take up "good positions" then in theory they should form a nice concave. "In theory" LUL
+    public static boolean isGoodPosition[][];
+    // whether a unit has already taken a potential good position
+    public static boolean isGoodPositionTaken[][];
 
     public static void main(String[] args) {
 
@@ -152,7 +174,7 @@ public class Player {
         }
     }
 
-    private static int getDirIndex(Direction dir) {
+    public static int getDirIndex(Direction dir) {
         // TODO: make this faster?
         for (int i = 0; i < 8; i++) {
             if (directions[i] == dir) {
@@ -163,7 +185,7 @@ public class Player {
         return 0;
     }
 
-    private static void initialize() {
+    public static void initialize() {
         PlanetMap earthMap = gc.startingMap(Planet.Earth);
         width = (int)earthMap.getWidth();
         height = (int)earthMap.getHeight();
@@ -171,6 +193,9 @@ public class Player {
         hasFriendlyUnit = new boolean[height][width];
         bfsSeen = new boolean[height][width];
         bfsDirectionIndexTo = new int[height][width];
+        attackDistanceToEnemy = new int[height][width];
+        isGoodPosition = new boolean[height][width];
+        isGoodPositionTaken = new boolean[height][width];
         for (int y = 0; y < height; y++) for (int x = 0; x < width; x++) {
             //System.out.println("checking if there's passable terrain at " + new MapLocation(gc.planet(), x, y).toString());
             //System.out.println("is passable at y = " + y + ", x = " + x + " is " + earthMap.isPassableTerrainAt(new MapLocation(gc.planet(), x, y)));
@@ -190,7 +215,7 @@ public class Player {
         }
     }
 
-    private static void initTurn(VecUnit myUnits) {
+    public static void initTurn(VecUnit myUnits) {
         factoryCount = 0;
         factoriesBeingBuilt.clear();
         for (int i = 0; i < myUnits.size(); i++) {
@@ -205,6 +230,9 @@ public class Player {
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
                 hasFriendlyUnit[y][x] = false;
+                attackDistanceToEnemy[y][x] = 9999;
+                isGoodPosition[y][x] = false;
+                isGoodPositionTaken[y][x] = false;
             }
         }
         workerCount = 0;
@@ -219,6 +247,27 @@ public class Player {
                 MapLocation loc = unit.location().mapLocation();
                 hasFriendlyUnit[loc.getY()][loc.getX()] = true;
             }
+
+            // calculate closest distances to enemy units
+            if (unit.team() != gc.team() && unit.location().isOnMap()) {
+                MapLocation loc = unit.location().mapLocation();
+                int locY = loc.getY(), locX = loc.getX();
+                for (int y = locY - 10; y <= locY + 10; y++) {
+                    if (y < 0 || height <= y) continue;
+                    for (int x = locX - 10; x <= locX + 10; x++) {
+                        if (x < 0 || width <= x) continue;
+                        attackDistanceToEnemy[y][x] = Math.min(attackDistanceToEnemy[y][x],
+                                (y - locY) * (y - locY) + (x - locX) * (x - locX));
+                    }
+                }
+            }
+        }
+
+        // calculate good positions
+        for (int y = 0; y < height; y++) for (int x = 0; x < width; x++) {
+            if (51 <= attackDistanceToEnemy[y][x] && attackDistanceToEnemy[y][x] <= 72) {
+                isGoodPosition[y][x] = true;
+            }
         }
 
         allMyUnits.clear();
@@ -227,7 +276,7 @@ public class Player {
         }
     }
 
-    private static void doMoveRobot(Unit unit, Direction dir) {
+    public static void doMoveRobot(Unit unit, Direction dir) {
         MapLocation loc = unit.location().mapLocation();
         if (!hasFriendlyUnit[loc.getY()][loc.getX()]) {
             System.out.println("Error: hasFriendlyUnit[][] is incorrect!");
@@ -239,7 +288,7 @@ public class Player {
         gc.moveRobot(unit.id(), dir);
     }
 
-    private static void shuffleDirOrder() {
+    public static void shuffleDirOrder() {
         for (int i = 7; i >= 0; i--) {
             int j = rand.nextInt(i+1);
             int tmp = randDirOrder[j];
@@ -252,10 +301,12 @@ public class Player {
     // store how close you want to get to your destination in howClose (distance = #moves distance, not Euclidean distance)
     // stores bfsClosestKarbonite: closest location which gets you within howClose of karbonite
     // stores bfsClosestEnemy: closest location which is within howClose of an enemy
+    // stores bfsClosestFreeGoodPosition: closest good position that hasn't been taken by another unit
     // stores the direction you should move to be within howClose of each square
-    private static void bfs(MapLocation from, int howClose) {
+    public static void bfs(MapLocation from, int howClose) {
         bfsClosestKarbonite = null;
         bfsClosestEnemy = null;
+        bfsClosestFreeGoodPosition = null;
 
         int fromY = from.getY(), fromX = from.getX();
         for (int y = 0; y < height; y++) for (int x = 0; x < width; x++) {
@@ -293,6 +344,9 @@ public class Player {
                                 gc.senseUnitAtLocation(loc).team() != gc.team()) {
                             bfsClosestEnemy = loc;
                         }
+                        if (bfsClosestFreeGoodPosition == null && isGoodPosition[y][x] && !isGoodPositionTaken[y][x]) {
+                            bfsClosestFreeGoodPosition = loc;
+                        }
                     }
                 }
             }
@@ -309,7 +363,7 @@ public class Player {
         }
     }
 
-    private static void runWorker(Unit unit) {
+    public static void runWorker(Unit unit) {
         boolean doneAction = false;
         boolean doneMovement = false;
 
@@ -484,7 +538,7 @@ public class Player {
         }
     }
 
-    private static void runFactory(Unit unit) {
+    public static void runFactory(Unit unit) {
         if (gc.canProduceRobot(unit.id(), UnitType.Ranger)) {
             //System.out.println("PRODUCING ROBOT!!!");
             gc.produceRobot(unit.id(), UnitType.Ranger);
@@ -502,7 +556,7 @@ public class Player {
         }
     }
 
-    private static void runRanger(Unit unit) {
+    public static void runRanger(Unit unit) {
         boolean doMove = true;
 
         if (unit.location().isOnMap()) {
@@ -523,18 +577,44 @@ public class Player {
         if (doMove) {
             if (unit.location().isOnMap() && gc.isMoveReady(unit.id())) {
                 boolean doneMove = false;
+
+                // check if current location is good position
+                if (!doneMove) {
+                    int y = unit.location().mapLocation().getY();
+                    int x = unit.location().mapLocation().getX();
+                    if (isGoodPosition[y][x] && !isGoodPositionTaken[y][x]) {
+                        isGoodPositionTaken[y][x] = true;
+                        doneMove = true;
+                    }
+                }
+
+                // otherwise, try to move to good position
+                bfs(unit.location().mapLocation(), 0);
+                if (!doneMove && bfsClosestFreeGoodPosition != null) {
+                    int y = bfsClosestFreeGoodPosition.getY();
+                    int x = bfsClosestFreeGoodPosition.getX();
+                    isGoodPositionTaken[y][x] = true;
+                    Direction dir = directions[bfsDirectionIndexTo[y][x]];
+                    if (gc.canMove(unit.id(), dir)) {
+                        doMoveRobot(unit, dir);
+                    }
+                    doneMove = true;
+                }
+
+                // otherwise move to attack loc
                 bfs(unit.location().mapLocation(), 1);
                 if (!doneMove && moveToAttackLocsYouMustCallBfsWithHowCloseSetTo1BeforeCallingThis(unit)) {
                     doneMove = true;
                 }
                 if (!doneMove) {
                     moveToTendency(unit);
+                    doneMove = true;
                 }
             }
         }
     }
 
-    private static void runKnight(Unit unit) {
+    public static void runKnight(Unit unit) {
         boolean doneMove = false;
 
         if (unit.location().isOnMap()) {
@@ -584,10 +664,10 @@ public class Player {
         }
     }
 
-    private static void runHealer(Unit unit) {
+    public static void runHealer(Unit unit) {
     }
 
-    private static int getTendency(Unit unit) {
+    public static int getTendency(Unit unit) {
         if (!tendency.containsKey(unit.id())) {
             if (attackLocs.isEmpty()) {
                 tendency.put(unit.id(), rand.nextInt(8));
@@ -603,7 +683,7 @@ public class Player {
         return tendency.get(unit.id());
     }
 
-    private static void updateTendency(int id, int changeChance) {
+    public static void updateTendency(int id, int changeChance) {
         if (!tendency.containsKey(id)) {
             return;
         }
@@ -618,12 +698,12 @@ public class Player {
         tendency.put(id, k);
     }
 
-    private static int moveDistance(MapLocation a, MapLocation b) {
+    public static int moveDistance(MapLocation a, MapLocation b) {
         return Math.max(Math.abs(a.getX() - b.getX()), Math.abs(a.getY() - b.getY()));
     }
 
     // Required: you must be able to sense every square around loc
-    private static int getSpaceAround(MapLocation loc) {
+    public static int getSpaceAround(MapLocation loc) {
         int space = 0;
         for (int i = 0; i < 8; i++) {
             MapLocation other = loc.add(directions[i]);
@@ -638,12 +718,12 @@ public class Player {
         return space;
     }
 
-    private static boolean isFriendlyStructure(Unit unit) {
+    public static boolean isFriendlyStructure(Unit unit) {
         return unit.team() == gc.team() && (unit.unitType() == UnitType.Factory || unit.unitType() == UnitType.Rocket);
     }
 
     // Required: loc must be a valid location (ie not out of bounds)
-    private static boolean isNextToBuildingFactory(MapLocation loc) {
+    public static boolean isNextToBuildingFactory(MapLocation loc) {
         for (int i = 0; i < 8; i++) {
             MapLocation other = loc.add(directions[i]);
             if (gc.hasUnitAtLocation(other)) {
@@ -656,7 +736,7 @@ public class Player {
         return false;
     }
 
-    private static void removeCompletedAttackLocs(Unit unit) {
+    public static void removeCompletedAttackLocs(Unit unit) {
         if (unit.location().isOnMap()) {
             for (int i = attackLocs.size()-1; i >= 0; i--) {
                 if (moveDistance(attackLocs.get(i), unit.location().mapLocation()) <= 1) {
@@ -666,7 +746,7 @@ public class Player {
         }
     }
 
-    private static boolean moveToAttackLocsYouMustCallBfsWithHowCloseSetTo1BeforeCallingThis(Unit unit) {
+    public static boolean moveToAttackLocsYouMustCallBfsWithHowCloseSetTo1BeforeCallingThis(Unit unit) {
         if (attackLocs.isEmpty()) {
             return false;
         }
@@ -692,7 +772,7 @@ public class Player {
         return false;
     }
 
-    private static void moveToTendency(Unit unit) {
+    public static void moveToTendency(Unit unit) {
         Direction moveDir = directions[getTendency(unit)];
         if (gc.canMove(unit.id(), moveDir)) {
             doMoveRobot(unit, moveDir);
