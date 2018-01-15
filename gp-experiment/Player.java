@@ -580,6 +580,7 @@ public class Player {
     public static void runFactory(Unit unit) {
         UnitType unitTypeToBuild = UnitType.Ranger;
 
+        // TODO: change proportion based on current research levels
         if (rangerCount >= 4 * healerCount + 4) {
             unitTypeToBuild = UnitType.Healer;
         }
@@ -636,12 +637,25 @@ public class Player {
                 } else {
                     // currently 1 move from being in range of enemy
                     if (!doneAttack && gc.isAttackReady(unit.id()) && gc.round() % 5 == 0) {
-                        // do some move
-                        // currently set to move toward attackLoc
-                        // TODO: change this. Like... seriously... change this...
-                        bfs(unit.location().mapLocation(), 1);
-                        if (moveToAttackLocsYouMustCallBfsWithHowCloseSetTo1BeforeCallingThis(unit)) {
-                            doneMove = true;
+                        // move into a position where you can attack
+                        shuffleDirOrder();
+                        for (int i = 0; i < 8; i++) {
+                            Direction dir = directions[randDirOrder[i]];
+                            MapLocation loc = unit.location().mapLocation().add(dir);
+                            if (0 <= loc.getY() && loc.getY() < height &&
+                                    0 <= loc.getX() && loc.getX() < width &&
+                                    attackDistanceToEnemy[loc.getY()][loc.getX()] <= RangerAttackRange &&
+                                    gc.canMove(unit.id(), dir)) {
+                                // mark your current position as yours so other rangers don't try to move there while you're gone
+                                if (isGoodPosition[myY][myX]) {
+                                    isGoodPositionTaken[myY][myX] = true;
+                                } else {
+                                    System.out.println("ERROR: expected current position to be a good position but it wasn't...");
+                                }
+                                doMoveRobot(unit, dir);
+                                doneMove = true;
+                                break;
+                            }
                         }
                     }
                 }
@@ -946,7 +960,7 @@ public class Player {
                 }
             }
             if (whichToHeal != -1 && whichToHealHealthMissing > 0) {
-                System.out.println("Healer says: 'I'm being useful!'");
+                //System.out.println("Healer says: 'I'm being useful!'");
                 gc.heal(unit.id(), units.get(whichToHeal).id());
                 return true;
             }
