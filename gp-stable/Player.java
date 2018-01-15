@@ -1,6 +1,7 @@
 // import the API.
 // See xxx for the javadocs.
 import bc.*;
+
 import java.util.Random;
 import java.util.Map;
 import java.util.HashMap;
@@ -34,14 +35,19 @@ public class Player {
         @Override
         public int compare(Unit x, Unit y)
         {
-            int xp = getUnitOrderPriority(x.unitType());
-            int yp = getUnitOrderPriority(y.unitType());
+            int xp = getUnitOrderPriority(x);
+            int yp = getUnitOrderPriority(y);
             return xp - yp;
         }
     }
 
-    public static int getUnitOrderPriority(UnitType unitType) {
-        switch(unitType) {
+    // used to give priority to units that are closer to enemies
+    public static int manhattanDistanceToNearestEnemy[][];
+    // Warning: constant used, would need to change this if the maps got bigger... but they probably won't get bigger so whatever.
+    public static final int ManhattanDistanceNotSeen = 499;
+
+    public static int getUnitOrderPriority(Unit unit) {
+        switch(unit.unitType()) {
             // Actually not sure whether fighting units or workers should go first... so just use the same priority...
             case Ranger:
             case Knight:
@@ -49,12 +55,21 @@ public class Player {
             case Healer:
             // Worker before factory so that workers can finish a currently building factory before the factory runs
             case Worker:
-                return 1;
+                if (unit.location().isOnMap()) {
+                    MapLocation loc = unit.location().mapLocation();
+                    // give priority to units that are closer to enemies
+                    // NOTE: the default value for manhattanDistanceToNearestEnemy (ie the value when there are no nearby
+                    //   enemies) should be less than 999 so that priorities don't get mixed up!
+                    return 1000 + manhattanDistanceToNearestEnemy[loc.getY()][loc.getX()];
+                } else {
+                    return 1999;
+                }
             // Factory before rocket so that factory can make a unit, then unit can get in rocket before the rocket runs
+            // Edit: not actually sure if you can actually do that lol... whatever.
             case Factory:
-                return 2;
+                return 2000;
             case Rocket:
-                return 3;
+                return 3000;
         }
         System.out.println("ERROR: getUnitOrderPriority() does not recognise this unit type!");
         return 9999;
@@ -82,6 +97,8 @@ public class Player {
     public static int factoryCount;
     public static ArrayList<Unit> factoriesBeingBuilt = new ArrayList<Unit>();
     public static int workerCount;
+    public static int rangerCount;
+    public static int healerCount;
     // Store this list of all our units ourselves, so that we can add to it when we create units and use those new units
     // immediately.
     public static Comparator<Unit> unitOrderComparator = new UnitOrderComparator();
@@ -103,10 +120,16 @@ public class Player {
     public static int attackDistanceToEnemy[][];
     // good positions are squares which are some distance from the enemy.
     // e.g. distance [51, 72] from the closest enemy (this might be changed later...)
+    // Warning: random constants being used. Need to be changed if constants change!
     // if units take up "good positions" then in theory they should form a nice concave. "In theory" LUL
     public static boolean isGoodPosition[][];
     // whether a unit has already taken a potential good position
     public static boolean isGoodPositionTaken[][];
+
+    public static final int RangerAttackRange = 50;
+    // distance you have to be to be one move away from ranger attack range
+    // unfortunately it's not actually the ranger's vision range which is 70, it's actually 72...
+    public static final int OneMoveFromRangerAttackRange = 72;
 
     public static void main(String[] args) {
 
@@ -135,7 +158,9 @@ public class Player {
 
         gc.queueResearch(UnitType.Worker);
         gc.queueResearch(UnitType.Ranger);
+        gc.queueResearch(UnitType.Healer);
         gc.queueResearch(UnitType.Ranger);
+        gc.queueResearch(UnitType.Healer);
         gc.queueResearch(UnitType.Rocket);
         gc.queueResearch(UnitType.Rocket);
         gc.queueResearch(UnitType.Rocket);
@@ -196,6 +221,7 @@ public class Player {
         attackDistanceToEnemy = new int[height][width];
         isGoodPosition = new boolean[height][width];
         isGoodPositionTaken = new boolean[height][width];
+        manhattanDistanceToNearestEnemy = new int[height][width];
         for (int y = 0; y < height; y++) for (int x = 0; x < width; x++) {
             //System.out.println("checking if there's passable terrain at " + new MapLocation(gc.planet(), x, y).toString());
             //System.out.println("is passable at y = " + y + ", x = " + x + " is " + earthMap.isPassableTerrainAt(new MapLocation(gc.planet(), x, y)));
@@ -236,28 +262,39 @@ public class Player {
             }
         }
         workerCount = 0;
+        rangerCount = 0;
+        healerCount = 0;
         VecUnit units = gc.units();
         for (int i = 0; i < units.size(); i++) {
             // Note: This loops through friendly AND enemy units!
             Unit unit = units.get(i);
-            if (unit.team() == gc.team() && unit.unitType() == UnitType.Worker) {
-                workerCount++;
-            }
-            if (unit.team() == gc.team() && unit.location().isOnMap()) {
-                MapLocation loc = unit.location().mapLocation();
-                hasFriendlyUnit[loc.getY()][loc.getX()] = true;
-            }
+            if (unit.team() == gc.team()) {
+                // my team
 
-            // calculate closest distances to enemy units
-            if (unit.team() != gc.team() && unit.location().isOnMap()) {
-                MapLocation loc = unit.location().mapLocation();
-                int locY = loc.getY(), locX = loc.getX();
-                for (int y = locY - 10; y <= locY + 10; y++) {
-                    if (y < 0 || height <= y) continue;
-                    for (int x = locX - 10; x <= locX + 10; x++) {
-                        if (x < 0 || width <= x) continue;
-                        attackDistanceToEnemy[y][x] = Math.min(attackDistanceToEnemy[y][x],
-                                (y - locY) * (y - locY) + (x - locX) * (x - locX));
+                if (unit.location().isOnMap()) {
+                    MapLocation loc = unit.location().mapLocation();
+                    hasFriendlyUnit[loc.getY()][loc.getX()] = true;
+                }
+
+                // friendly unit counts
+                addToFriendlyUnitCount(unit.unitType());
+                if (unit.unitType() == UnitType.Factory && unit.isFactoryProducing() != 0) {
+                    addToFriendlyUnitCount(unit.factoryUnitType());
+                }
+            } else {
+                // enemy team
+
+                // calculate closest distances to enemy units
+                if (unit.location().isOnMap()) {
+                    MapLocation loc = unit.location().mapLocation();
+                    int locY = loc.getY(), locX = loc.getX();
+                    for (int y = locY - 10; y <= locY + 10; y++) {
+                        if (y < 0 || height <= y) continue;
+                        for (int x = locX - 10; x <= locX + 10; x++) {
+                            if (x < 0 || width <= x) continue;
+                            attackDistanceToEnemy[y][x] = Math.min(attackDistanceToEnemy[y][x],
+                                    (y - locY) * (y - locY) + (x - locX) * (x - locX));
+                        }
                     }
                 }
             }
@@ -265,7 +302,7 @@ public class Player {
 
         // calculate good positions
         for (int y = 0; y < height; y++) for (int x = 0; x < width; x++) {
-            if (51 <= attackDistanceToEnemy[y][x] && attackDistanceToEnemy[y][x] <= 72) {
+            if (RangerAttackRange < attackDistanceToEnemy[y][x] && attackDistanceToEnemy[y][x] <= OneMoveFromRangerAttackRange) {
                 isGoodPosition[y][x] = true;
             }
         }
@@ -274,6 +311,8 @@ public class Player {
         for (int i = 0; i < myUnits.size(); i++) {
             allMyUnits.add(myUnits.get(i));
         }
+
+        calculateManhattanDistancesToClosestEnemies(units);
     }
 
     public static void doMoveRobot(Unit unit, Direction dir) {
@@ -539,9 +578,17 @@ public class Player {
     }
 
     public static void runFactory(Unit unit) {
-        if (gc.canProduceRobot(unit.id(), UnitType.Ranger)) {
+        UnitType unitTypeToBuild = UnitType.Ranger;
+
+        if (rangerCount >= 4 * healerCount + 4) {
+            unitTypeToBuild = UnitType.Healer;
+        }
+
+        if (gc.canProduceRobot(unit.id(), unitTypeToBuild)) {
             //System.out.println("PRODUCING ROBOT!!!");
-            gc.produceRobot(unit.id(), UnitType.Ranger);
+            gc.produceRobot(unit.id(), unitTypeToBuild);
+            // make sure to immediately update unit counts
+            addToFriendlyUnitCount(unitTypeToBuild);
         }
 
         for (int j = 0; j < 8; j++) {
@@ -557,34 +604,90 @@ public class Player {
     }
 
     public static void runRanger(Unit unit) {
-        boolean doMove = true;
+        // try to attack before and after moving
+        boolean doneAttack = rangerTryToAttack(unit);
 
-        if (unit.location().isOnMap()) {
-            VecUnit units = gc.senseNearbyUnits(unit.location().mapLocation(), unit.attackRange());
-            for (int i = 0; i < units.size(); i++) {
-                Unit other = units.get(i);
-                if (other.team() != unit.team() && gc.canAttack(unit.id(), other.id())) {
-                    doMove = false;
-                    if (gc.isAttackReady(unit.id())) {
-                        gc.attack(unit.id(), other.id());
-                    }
-                }
-            }
-        }
-
+        // remove completed objectives
         removeCompletedAttackLocs(unit);
 
-        if (doMove) {
-            if (unit.location().isOnMap() && gc.isMoveReady(unit.id())) {
-                boolean doneMove = false;
+        // decide movement
+        if (unit.location().isOnMap() && gc.isMoveReady(unit.id())) {
+            boolean doneMove = false;
+            int myY = unit.location().mapLocation().getY();
+            int myX = unit.location().mapLocation().getX();
+
+            // Warning: Constant being used. Change this constant
+            if (!doneMove && attackDistanceToEnemy[myY][myX] <= OneMoveFromRangerAttackRange) {
+                // if near enemies, do fighting movement
+
+                // somehow decide whether to move forward or backwards
+                if (attackDistanceToEnemy[myY][myX] <= RangerAttackRange) {
+                    // currently in range of enemy
+
+                    if (doneAttack) {
+                        // just completed an attack, move backwards now to kite
+                        // to move backwards, we just don't set doneMove to true
+                        // and then the code will fall back to the "move to good position" code
+
+                    } else {
+                        // wait for your next attack before kiting back, so don't move yet
+                        doneMove = true;
+                    }
+                } else {
+                    // currently 1 move from being in range of enemy
+                    if (!doneAttack && gc.isAttackReady(unit.id()) && gc.round() % 5 == 0) {
+                        // do some move
+                        // currently set to move toward attackLoc
+                        // TODO: change this. Like... seriously... change this...
+                        bfs(unit.location().mapLocation(), 1);
+                        if (moveToAttackLocsYouMustCallBfsWithHowCloseSetTo1BeforeCallingThis(unit)) {
+                            doneMove = true;
+                        }
+                    }
+                }
+
+                if (doneMove) {
+                    // if you ended up on a good position, claim it so no-one else tries to move to it
+                    // TODO: add this
+                    // TODO: THIS IS A REALLY SIMPLE CHANGE
+                    // TODO: SERIOUSLY JUST ADD THIS
+                }
+            }
+
+            if (!doneMove) {
+                // otherwise, search for a good destination to move towards
 
                 // check if current location is good position
-                if (!doneMove) {
-                    int y = unit.location().mapLocation().getY();
-                    int x = unit.location().mapLocation().getX();
-                    if (isGoodPosition[y][x] && !isGoodPositionTaken[y][x]) {
-                        isGoodPositionTaken[y][x] = true;
-                        doneMove = true;
+                if (!doneMove && isGoodPosition[myY][myX]) {
+                    doneMove = true;
+
+                    // if there's an closer (or equally close) adjacent good position
+                    // and the next attack wave isn't too soon, then move to it
+                    boolean foundMove = false;
+                    if (gc.round() % 5 < 3) {
+                        shuffleDirOrder();
+                        for (int i = 0; i < 8; i++) {
+                            Direction dir = directions[randDirOrder[i]];
+                            MapLocation loc = unit.location().mapLocation().add(dir);
+                            if (0 <= loc.getY() && loc.getY() < height &&
+                                    0 <= loc.getX() && loc.getX() < width &&
+                                    isGoodPosition[loc.getY()][loc.getX()] &&
+                                    manhattanDistanceToNearestEnemy[loc.getY()][loc.getX()] <= manhattanDistanceToNearestEnemy[myY][myX] &&
+                                    gc.canMove(unit.id(), dir)) {
+                                //System.out.println("moving to other good location!!");
+                                foundMove = true;
+                                doMoveRobot(unit, dir);
+                                isGoodPositionTaken[loc.getY()][loc.getX()] = true;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (!foundMove) {
+                        // otherwise, stay on your current position
+                        if (!isGoodPositionTaken[myY][myX]) {
+                            isGoodPositionTaken[myY][myX] = true;
+                        }
                     }
                 }
 
@@ -611,6 +714,12 @@ public class Player {
                     doneMove = true;
                 }
             }
+        }
+
+        // try to attack before and after moving
+        if (!doneAttack) {
+            rangerTryToAttack(unit);
+            doneAttack = true;
         }
     }
 
@@ -640,8 +749,8 @@ public class Player {
                 // If the closest enemy is within some arbitrary distance, attack them
                 // Currently set to ranger attack range
                 // Warning: Constant used that might change!
-                if (bfsClosestEnemy != null && unit.location().mapLocation().distanceSquaredTo(bfsClosestEnemy) <= 50) {
-                    System.out.println("My location = " + unit.location().mapLocation().toString() + ", closest enemy loc = " + bfsClosestEnemy.toString());
+                if (bfsClosestEnemy != null && unit.location().mapLocation().distanceSquaredTo(bfsClosestEnemy) <= RangerAttackRange) {
+                    //System.out.println("My location = " + unit.location().mapLocation().toString() + ", closest enemy loc = " + bfsClosestEnemy.toString());
                     doneMove = true;
                     Direction dir = directions[bfsDirectionIndexTo[bfsClosestEnemy.getY()][bfsClosestEnemy.getX()]];
                     if (gc.canMove(unit.id(), dir)) {
@@ -665,6 +774,17 @@ public class Player {
     }
 
     public static void runHealer(Unit unit) {
+        boolean healDone = tryToHeal(unit);
+
+        // move to friendly unit
+        if (!healDone) {
+            // Kappa. Just move to tendency for now.
+            moveToTendency(unit);
+        }
+
+        if (!healDone) {
+            tryToHeal(unit);
+        }
     }
 
     public static int getTendency(Unit unit) {
@@ -774,11 +894,106 @@ public class Player {
 
     public static void moveToTendency(Unit unit) {
         Direction moveDir = directions[getTendency(unit)];
-        if (gc.canMove(unit.id(), moveDir)) {
+        if (gc.isMoveReady(unit.id()) && gc.canMove(unit.id(), moveDir)) {
             doMoveRobot(unit, moveDir);
             updateTendency(unit.id(), 6);
         } else {
             updateTendency(unit.id(), 100);
+        }
+    }
+
+    // returns whether the unit attacked
+    public static boolean rangerTryToAttack(Unit unit) {
+        if (unit.location().isOnMap() && gc.isAttackReady(unit.id())) {
+            // this radius needs to be at least 1 square larger than the ranger's attack range
+            // because the ranger might move, but the ranger's unit.location().mapLocation() won't update unless we
+            // call again. So just query a larger area around the ranger's starting location.
+            VecUnit units = gc.senseNearbyUnits(unit.location().mapLocation(), 99);
+            for (int i = 0; i < units.size(); i++) {
+                Unit other = units.get(i);
+                if (other.team() != unit.team() && gc.canAttack(unit.id(), other.id())) {
+                    gc.attack(unit.id(), other.id());
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    // returns whether the healer successfully healed
+    public static boolean tryToHeal(Unit unit) {
+        if (unit.location().isOnMap() && gc.isHealReady(unit.id())) {
+            // this radius needs to be larger than the healer's heal range in case the healer moves
+            // (because the Unit object is cached and the location() won't update)
+            VecUnit units = gc.senseNearbyUnitsByTeam(unit.location().mapLocation(), 80, gc.team());
+            int whichToHeal = -1, whichToHealHealthMissing = -1;
+            for (int i = 0; i < units.size(); i++) {
+                Unit other = units.get(i);
+                if (gc.canHeal(unit.id(), other.id())) {
+                    int healthMissing = (int)(other.maxHealth() - other.health());
+                    if (whichToHeal == -1 || healthMissing > whichToHealHealthMissing) {
+                        whichToHeal = i;
+                        whichToHealHealthMissing = healthMissing;
+                    }
+                }
+            }
+            if (whichToHeal != -1 && whichToHealHealthMissing > 0) {
+                System.out.println("Healer says: 'I'm being useful!'");
+                gc.heal(unit.id(), units.get(whichToHeal).id());
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public static void calculateManhattanDistancesToClosestEnemies(VecUnit allUnits) {
+        // multi-source bfs from all enemies
+
+        Queue<BfsState> queue = new LinkedList<>();
+
+        for (int y = 0; y < height; y++) for (int x = 0; x < width; x++) {
+            // see note about what this default value should be in getUnitOrderPriority()
+            manhattanDistanceToNearestEnemy[y][x] = ManhattanDistanceNotSeen;
+        }
+
+        for (int i = 0; i < allUnits.size(); i++) {
+            Unit unit = allUnits.get(i);
+            if (unit.team() != gc.team() && unit.location().isOnMap()) {
+                MapLocation loc = unit.location().mapLocation();
+                manhattanDistanceToNearestEnemy[loc.getY()][loc.getX()] = 0;
+                // not using startingDirection so just pass -420
+                queue.add(new BfsState(loc.getY(), loc.getX(), -420));
+            }
+        }
+
+        while (!queue.isEmpty()) {
+            BfsState cur = queue.peek();
+            queue.remove();
+
+            // use d += 2 because we're doing manhattan distance
+            for (int d = 0; d < 8; d += 2) {
+                int ny = cur.y + dy[d];
+                int nx = cur.x + dx[d];
+                if (0 <= ny && ny < height && 0 <= nx && nx < width &&
+                        manhattanDistanceToNearestEnemy[ny][nx] == ManhattanDistanceNotSeen) {
+                    manhattanDistanceToNearestEnemy[ny][nx] = manhattanDistanceToNearestEnemy[cur.y][cur.x] + 1;
+                    queue.add(new BfsState(ny, nx, -420));
+                }
+            }
+        }
+    }
+
+    public static void addToFriendlyUnitCount(UnitType unitType) {
+        switch (unitType) {
+            case Worker:
+                workerCount++;
+                break;
+            case Ranger:
+                rangerCount++;
+                break;
+            case Healer:
+                healerCount++;
+                break;
         }
     }
 }
