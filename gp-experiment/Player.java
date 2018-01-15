@@ -1,6 +1,7 @@
 // import the API.
 // See xxx for the javadocs.
 import bc.*;
+
 import java.util.Random;
 import java.util.Map;
 import java.util.HashMap;
@@ -96,6 +97,8 @@ public class Player {
     public static int factoryCount;
     public static ArrayList<Unit> factoriesBeingBuilt = new ArrayList<Unit>();
     public static int workerCount;
+    public static int rangerCount;
+    public static int healerCount;
     // Store this list of all our units ourselves, so that we can add to it when we create units and use those new units
     // immediately.
     public static Comparator<Unit> unitOrderComparator = new UnitOrderComparator();
@@ -155,7 +158,9 @@ public class Player {
 
         gc.queueResearch(UnitType.Worker);
         gc.queueResearch(UnitType.Ranger);
+        gc.queueResearch(UnitType.Healer);
         gc.queueResearch(UnitType.Ranger);
+        gc.queueResearch(UnitType.Healer);
         gc.queueResearch(UnitType.Rocket);
         gc.queueResearch(UnitType.Rocket);
         gc.queueResearch(UnitType.Rocket);
@@ -257,28 +262,39 @@ public class Player {
             }
         }
         workerCount = 0;
+        rangerCount = 0;
+        healerCount = 0;
         VecUnit units = gc.units();
         for (int i = 0; i < units.size(); i++) {
             // Note: This loops through friendly AND enemy units!
             Unit unit = units.get(i);
-            if (unit.team() == gc.team() && unit.unitType() == UnitType.Worker) {
-                workerCount++;
-            }
-            if (unit.team() == gc.team() && unit.location().isOnMap()) {
-                MapLocation loc = unit.location().mapLocation();
-                hasFriendlyUnit[loc.getY()][loc.getX()] = true;
-            }
+            if (unit.team() == gc.team()) {
+                // my team
 
-            // calculate closest distances to enemy units
-            if (unit.team() != gc.team() && unit.location().isOnMap()) {
-                MapLocation loc = unit.location().mapLocation();
-                int locY = loc.getY(), locX = loc.getX();
-                for (int y = locY - 10; y <= locY + 10; y++) {
-                    if (y < 0 || height <= y) continue;
-                    for (int x = locX - 10; x <= locX + 10; x++) {
-                        if (x < 0 || width <= x) continue;
-                        attackDistanceToEnemy[y][x] = Math.min(attackDistanceToEnemy[y][x],
-                                (y - locY) * (y - locY) + (x - locX) * (x - locX));
+                if (unit.location().isOnMap()) {
+                    MapLocation loc = unit.location().mapLocation();
+                    hasFriendlyUnit[loc.getY()][loc.getX()] = true;
+                }
+
+                // friendly unit counts
+                addToFriendlyUnitCount(unit.unitType());
+                if (unit.unitType() == UnitType.Factory && unit.isFactoryProducing() != 0) {
+                    addToFriendlyUnitCount(unit.factoryUnitType());
+                }
+            } else {
+                // enemy team
+
+                // calculate closest distances to enemy units
+                if (unit.location().isOnMap()) {
+                    MapLocation loc = unit.location().mapLocation();
+                    int locY = loc.getY(), locX = loc.getX();
+                    for (int y = locY - 10; y <= locY + 10; y++) {
+                        if (y < 0 || height <= y) continue;
+                        for (int x = locX - 10; x <= locX + 10; x++) {
+                            if (x < 0 || width <= x) continue;
+                            attackDistanceToEnemy[y][x] = Math.min(attackDistanceToEnemy[y][x],
+                                    (y - locY) * (y - locY) + (x - locX) * (x - locX));
+                        }
                     }
                 }
             }
@@ -562,9 +578,17 @@ public class Player {
     }
 
     public static void runFactory(Unit unit) {
-        if (gc.canProduceRobot(unit.id(), UnitType.Ranger)) {
+        UnitType unitTypeToBuild = UnitType.Ranger;
+
+        if (rangerCount >= 4 * healerCount + 4) {
+            unitTypeToBuild = UnitType.Healer;
+        }
+
+        if (gc.canProduceRobot(unit.id(), unitTypeToBuild)) {
             //System.out.println("PRODUCING ROBOT!!!");
-            gc.produceRobot(unit.id(), UnitType.Ranger);
+            gc.produceRobot(unit.id(), unitTypeToBuild);
+            // make sure to immediately update unit counts
+            addToFriendlyUnitCount(unitTypeToBuild);
         }
 
         for (int j = 0; j < 8; j++) {
@@ -750,6 +774,17 @@ public class Player {
     }
 
     public static void runHealer(Unit unit) {
+        boolean healDone = tryToHeal(unit);
+
+        // move to friendly unit
+        if (!healDone) {
+            // Kappa. Just move to tendency for now.
+            moveToTendency(unit);
+        }
+
+        if (!healDone) {
+            tryToHeal(unit);
+        }
     }
 
     public static int getTendency(Unit unit) {
@@ -859,7 +894,7 @@ public class Player {
 
     public static void moveToTendency(Unit unit) {
         Direction moveDir = directions[getTendency(unit)];
-        if (gc.canMove(unit.id(), moveDir)) {
+        if (gc.isMoveReady(unit.id()) && gc.canMove(unit.id(), moveDir)) {
             doMoveRobot(unit, moveDir);
             updateTendency(unit.id(), 6);
         } else {
@@ -880,6 +915,32 @@ public class Player {
                     gc.attack(unit.id(), other.id());
                     return true;
                 }
+            }
+        }
+        return false;
+    }
+
+    // returns whether the healer successfully healed
+    public static boolean tryToHeal(Unit unit) {
+        if (unit.location().isOnMap() && gc.isHealReady(unit.id())) {
+            // this radius needs to be larger than the healer's heal range in case the healer moves
+            // (because the Unit object is cached and the location() won't update)
+            VecUnit units = gc.senseNearbyUnitsByTeam(unit.location().mapLocation(), 80, gc.team());
+            int whichToHeal = -1, whichToHealHealthMissing = -1;
+            for (int i = 0; i < units.size(); i++) {
+                Unit other = units.get(i);
+                if (gc.canHeal(unit.id(), other.id())) {
+                    int healthMissing = (int)(other.maxHealth() - other.health());
+                    if (whichToHeal == -1 || healthMissing > whichToHealHealthMissing) {
+                        whichToHeal = i;
+                        whichToHealHealthMissing = healthMissing;
+                    }
+                }
+            }
+            if (whichToHeal != -1 && whichToHealHealthMissing > 0) {
+                System.out.println("Healer says: 'I'm being useful!'");
+                gc.heal(unit.id(), units.get(whichToHeal).id());
+                return true;
             }
         }
         return false;
@@ -919,6 +980,20 @@ public class Player {
                     queue.add(new BfsState(ny, nx, -420));
                 }
             }
+        }
+    }
+
+    public static void addToFriendlyUnitCount(UnitType unitType) {
+        switch (unitType) {
+            case Worker:
+                workerCount++;
+                break;
+            case Ranger:
+                rangerCount++;
+                break;
+            case Healer:
+                healerCount++;
+                break;
         }
     }
 }
