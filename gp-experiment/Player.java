@@ -13,6 +13,8 @@ import java.util.Comparator;
 
 public class Player {
 
+    public static int[][][][] dis = new int[55][55][55][55];
+
     public static int dy[] = {1,1,0,-1,-1,-1,0,1,0};
     public static int dx[] = {0,1,1,1,0,-1,-1,-1,0};
 
@@ -25,6 +27,15 @@ public class Player {
             y = yy;
             x = xx;
             startingDir = sd;
+        }
+    }
+
+    static class SimpleState {
+        public int y, x;
+
+        public SimpleState (int yy, int xx) {
+            y = yy;
+            x = xx;
         }
     }
 
@@ -125,6 +136,9 @@ public class Player {
     public static boolean isGoodPosition[][];
     // whether a unit has already taken a potential good position
     public static boolean isGoodPositionTaken[][];
+    public static int numGoodPositions;
+    public static int goodPositionsXList[];
+    public static int goodPositionsYList[];
 
     public static final int RangerAttackRange = 50;
     // distance you have to be to be one move away from ranger attack range
@@ -221,6 +235,8 @@ public class Player {
         attackDistanceToEnemy = new int[height][width];
         isGoodPosition = new boolean[height][width];
         isGoodPositionTaken = new boolean[height][width];
+        goodPositionsXList = new int[height * width];
+        goodPositionsYList = new int[height * width];
         manhattanDistanceToNearestEnemy = new int[height][width];
         for (int y = 0; y < height; y++) for (int x = 0; x < width; x++) {
             //System.out.println("checking if there's passable terrain at " + new MapLocation(gc.planet(), x, y).toString());
@@ -239,6 +255,7 @@ public class Player {
         for (int i = 0; i < 8; i++) {
             randDirOrder[i] = i;
         }
+        allPairsShortestPath();
     }
 
     public static void initTurn(VecUnit myUnits) {
@@ -301,9 +318,14 @@ public class Player {
         }
 
         // calculate good positions
+        numGoodPositions = 0;
         for (int y = 0; y < height; y++) for (int x = 0; x < width; x++) {
             if (RangerAttackRange < attackDistanceToEnemy[y][x] && attackDistanceToEnemy[y][x] <= OneMoveFromRangerAttackRange) {
                 isGoodPosition[y][x] = true;
+                goodPositionsYList[numGoodPositions] = y;
+                goodPositionsXList[numGoodPositions] = x;
+                //System.out.println("good position at " + y + " " + x);
+                numGoodPositions++;
             }
         }
 
@@ -706,21 +728,18 @@ public class Player {
                 }
 
                 // otherwise, try to move to good position
-                bfs(unit.location().mapLocation(), 0);
-                if (!doneMove && bfsClosestFreeGoodPosition != null) {
-                    int y = bfsClosestFreeGoodPosition.getY();
-                    int x = bfsClosestFreeGoodPosition.getX();
+                MapLocation closestFreeGoodPosition = getClosestFreeGoodPosition(myY, myX);
+                if (!doneMove && closestFreeGoodPosition != null) {
+                    int y = closestFreeGoodPosition.getY();
+                    int x = closestFreeGoodPosition.getX();
                     isGoodPositionTaken[y][x] = true;
-                    Direction dir = directions[bfsDirectionIndexTo[y][x]];
-                    if (gc.canMove(unit.id(), dir)) {
-                        doMoveRobot(unit, dir);
-                    }
+                    //System.out.println("I'm at " + unit.location().mapLocation().toString() + " and I'm moving to good location " + closestFreeGoodPosition.toString());
+                    tryMoveToLoc(unit, closestFreeGoodPosition);
                     doneMove = true;
                 }
 
                 // otherwise move to attack loc
-                bfs(unit.location().mapLocation(), 1);
-                if (!doneMove && moveToAttackLocsYouMustCallBfsWithHowCloseSetTo1BeforeCallingThis(unit)) {
+                if (!doneMove && moveToAttackLocs(unit)) {
                     doneMove = true;
                 }
                 if (!doneMove) {
@@ -775,7 +794,7 @@ public class Player {
 
             if (!doneMove) {
                 // try to move to attack location
-                if (moveToAttackLocsYouMustCallBfsWithHowCloseSetTo1BeforeCallingThis(unit)) {
+                if (moveToAttackLocs(unit)) {
                     doneMove = true;
                 }
             }
@@ -833,7 +852,80 @@ public class Player {
     }
 
     public static int moveDistance(MapLocation a, MapLocation b) {
-        return Math.max(Math.abs(a.getX() - b.getX()), Math.abs(a.getY() - b.getY()));
+        return dis[a.getY()][a.getX()][b.getY()][b.getX()];
+    }
+
+    private static void allPairsShortestPath () {
+        for (int sy = 0; sy < height; sy++) {
+            for (int sx = 0; sx < width; sx++) {
+
+                for (int y = 0; y < height; y++) for (int x = 0; x < width; x++) {
+                    // large number so that we don't accidentally think that unreachable squares are the closest squares
+                    dis[sy][sx][y][x] = 999;
+                }
+
+                Queue<SimpleState> queue = new LinkedList<>();
+                queue.add(new SimpleState(sy, sx));
+                dis[sy][sx][sy][sx] = 0;
+
+                while (!queue.isEmpty()) {
+                    SimpleState cur = queue.peek();
+                    queue.remove();
+
+                    for (int d = 0; d < 8; d++) {
+                        int ny = cur.y + dy[d];
+                        int nx = cur.x + dx[d];
+                        if (0 <= ny && ny < height && 0 <= nx && nx < width && isPassable[ny][nx] && dis[sy][sx][ny][nx] == 999) {
+                            dis[sy][sx][ny][nx] = dis[sy][sx][cur.y][cur.x] + 1;
+                            queue.add(new SimpleState(ny, nx));
+                        }
+                    }
+                }
+
+            }
+        }
+    }
+
+    private static boolean tryMoveToLoc (Unit unit, MapLocation to) {
+
+        if (!gc.isMoveReady(unit.id())) {
+            return false;
+        }
+
+        int myY = unit.location().mapLocation().getY();
+        int myX = unit.location().mapLocation().getX();
+        int toX = to.getX();
+        int toY = to.getY();
+        int bestDist = -1;
+        int bestDir = -1;
+
+        for (int i = 0; i < 8; i++) {
+            if (gc.canMove(unit.id(), directions[i])) {
+                int tmpDist = dis[toY][toX][myY + dy[i]][myX + dx[i]];
+                if (bestDist == -1 || tmpDist < bestDist) {
+                    bestDist = tmpDist;
+                    bestDir = i;
+                }
+            }
+        }
+
+        if (bestDir == -1) {
+            return false;
+        }
+
+        int myDis = dis[toY][toX][myY][myX];
+        if (bestDist < myDis) {
+            doMoveRobot(unit, directions[bestDir]);
+        } else if (bestDist == myDis) {
+            if (rand.nextInt(100) < 50) {
+                doMoveRobot(unit, directions[bestDir]);
+            }
+        } else {
+            if (rand.nextInt(100) < 20) {
+                doMoveRobot(unit, directions[bestDir]);
+            }
+        }
+        return true;
     }
 
     // Required: you must be able to sense every square around loc
@@ -880,7 +972,7 @@ public class Player {
         }
     }
 
-    public static boolean moveToAttackLocsYouMustCallBfsWithHowCloseSetTo1BeforeCallingThis(Unit unit) {
+    public static boolean moveToAttackLocs(Unit unit) {
         if (attackLocs.isEmpty()) {
             return false;
         }
@@ -896,14 +988,7 @@ public class Player {
                 bestLoc = attackLocs.get(i);
             }
         }
-        //System.out.println("doing bfs");
-        Direction moveDir = directions[bfsDirectionIndexTo[bestLoc.getY()][bestLoc.getX()]];
-        //System.out.println("got, from dfs, direction " + moveDir.toString());
-        if (moveDir != Direction.Center && gc.canMove(unit.id(), moveDir)) {
-            doMoveRobot(unit, moveDir);
-            return true;
-        }
-        return false;
+        return tryMoveToLoc(unit, bestLoc);
     }
 
     public static void moveToTendency(Unit unit) {
@@ -971,7 +1056,7 @@ public class Player {
     public static void calculateManhattanDistancesToClosestEnemies(VecUnit allUnits) {
         // multi-source bfs from all enemies
 
-        Queue<BfsState> queue = new LinkedList<>();
+        Queue<SimpleState> queue = new LinkedList<>();
 
         for (int y = 0; y < height; y++) for (int x = 0; x < width; x++) {
             // see note about what this default value should be in getUnitOrderPriority()
@@ -983,13 +1068,12 @@ public class Player {
             if (unit.team() != gc.team() && unit.location().isOnMap()) {
                 MapLocation loc = unit.location().mapLocation();
                 manhattanDistanceToNearestEnemy[loc.getY()][loc.getX()] = 0;
-                // not using startingDirection so just pass -420
-                queue.add(new BfsState(loc.getY(), loc.getX(), -420));
+                queue.add(new SimpleState(loc.getY(), loc.getX()));
             }
         }
 
         while (!queue.isEmpty()) {
-            BfsState cur = queue.peek();
+            SimpleState cur = queue.peek();
             queue.remove();
 
             // use d += 2 because we're doing manhattan distance
@@ -999,7 +1083,7 @@ public class Player {
                 if (0 <= ny && ny < height && 0 <= nx && nx < width &&
                         manhattanDistanceToNearestEnemy[ny][nx] == ManhattanDistanceNotSeen) {
                     manhattanDistanceToNearestEnemy[ny][nx] = manhattanDistanceToNearestEnemy[cur.y][cur.x] + 1;
-                    queue.add(new BfsState(ny, nx, -420));
+                    queue.add(new SimpleState(ny, nx));
                 }
             }
         }
@@ -1016,6 +1100,23 @@ public class Player {
             case Healer:
                 healerCount++;
                 break;
+        }
+    }
+
+    public static MapLocation getClosestFreeGoodPosition(int y, int x) {
+        int best = -1, bestDis = 999;
+        for (int i = 0; i < numGoodPositions; i++) {
+            int curY = goodPositionsYList[i];
+            int curX = goodPositionsXList[i];
+            if (!isGoodPositionTaken[curY][curX] && (best == -1 || dis[y][x][curY][curX] < bestDis)) {
+                best = i;
+                bestDis = dis[y][x][curY][curX];
+            }
+        }
+        if (best == -1) {
+            return null;
+        } else {
+            return new MapLocation(gc.planet(), goodPositionsXList[best], goodPositionsYList[best]);
         }
     }
 }
