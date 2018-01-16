@@ -1312,6 +1312,17 @@ public class Player {
         }
     }
 
+    // returns the priority of the unit for a range to attack
+    public static int getRangerAttackPriority(Unit unit){
+        if (unit.unitType()==UnitType.Rocket || unit.unitType()==UnitType.Factory){
+            return 0;
+        }
+        if (unit.unitType()==UnitType.Worker){
+            return 1;
+        }
+        return 2;
+    }
+
     // returns whether the unit attacked
     public static boolean rangerTryToAttack(Unit unit) {
         if (unit.location().isOnMap() && gc.isAttackReady(unit.id())) {
@@ -1319,13 +1330,16 @@ public class Player {
             // because the ranger might move, but the ranger's unit.location().mapLocation() won't update unless we
             // call again. So just query a larger area around the ranger's starting location.
             VecUnit units = gc.senseNearbyUnits(unit.location().mapLocation(), 99);
-            int whichToAttack = -1, whichToAttackHealth = 999;
+            int whichToAttack = -1, whichToAttackHealth = 999, whichToAttackPriority = -1;
             for (int i = 0; i < units.size(); i++) {
                 Unit other = units.get(i);
                 if (other.team() != unit.team() && gc.canAttack(unit.id(), other.id())) {
                     int health = (int)other.health();
-                    if (whichToAttack == -1 || health < whichToAttackHealth) {
+                    int attackPriority = (int) getRangerAttackPriority(other);
+
+                    if (whichToAttack == -1 || (attackPriority>whichToAttackPriority) || (attackPriority==whichToAttackPriority && health < whichToAttackHealth)) {
                         whichToAttack = i;
+                        whichToAttackPriority = attackPriority;
                         whichToAttackHealth = health;
                     }
                 }
