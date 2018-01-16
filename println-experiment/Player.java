@@ -1019,14 +1019,14 @@ public class Player {
             // because the ranger might move, but the ranger's unit.location().mapLocation() won't update unless we
             // call again. So just query a larger area around the ranger's starting location.
             VecUnit units = gc.senseNearbyUnits(unit.location().mapLocation(), 99);
-            int whichToAttack = -1, whichToAttackHealth = 999, whichToAttackPriority = -1s;
+            int whichToAttack = -1, whichToAttackHealth = 999, whichToAttackPriority = -1;
             for (int i = 0; i < units.size(); i++) {
                 Unit other = units.get(i);
                 if (other.team() != unit.team() && gc.canAttack(unit.id(), other.id())) {
                     int health = (int)other.health();
                     int attackPriority = (int) getRangerAttackPriority(other);
 
-                    if (whichToAttack == -1 || (attackPriority>whichToAttackPriority) || (attackPriority==whichToAttackPriority && health < whichToAttackHealth) {
+                    if (whichToAttack == -1 || (attackPriority>whichToAttackPriority) || (attackPriority==whichToAttackPriority && health < whichToAttackHealth)) {
                         whichToAttack = i;
                         whichToAttackPriority = attackPriority;
                         whichToAttackHealth = health;
