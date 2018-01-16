@@ -149,6 +149,8 @@ public class Player {
     public static int lastKnownKarboniteAmount[][] = new int[55][55];
     public static int distToKarbonite[][] = new int[55][55];
 
+    public static int distToDamagedFriendlyHealableUnit[][] = new int[55][55];
+
     public static final int MultisourceBfsUnreachable = 999;
 
     // whether the square is "near" enemy units
@@ -371,6 +373,7 @@ public class Player {
         numWorkers = 0; numKnights = 0; numRangers = 0; numMages = 0; numHealers = 0; numFactories = 0; numRockets = 0;
         numFactoryBlueprints = 0; numRocketBlueprints = 0;
 
+        ArrayList<SimpleState> damagedFriendlyHealableUnits = new ArrayList<SimpleState>();
         VecUnit units = gc.units();
         for (int i = 0; i < units.size(); i++) {
             // Note: This loops through friendly AND enemy units!
@@ -381,6 +384,11 @@ public class Player {
                 if (unit.location().isOnMap()) {
                     MapLocation loc = unit.location().mapLocation();
                     hasFriendlyUnit[loc.getY()][loc.getX()] = true;
+
+                    if (isHealableUnitType(unit.unitType()) && unit.health() < unit.maxHealth()) {
+                        MapLocation damagedUnitLoc = unit.location().mapLocation();
+                        damagedFriendlyHealableUnits.add(new SimpleState(damagedUnitLoc.getY(), damagedUnitLoc.getX()));
+                    }
                 }
 
                 // friendly unit counts
@@ -452,6 +460,9 @@ public class Player {
             }
         }
         multisourceBfsAvoidingUnitsAndDanger(karboniteLocs, distToKarbonite);
+
+        // calculate distances to damaged healable friendly units
+        multisourceBfsAvoidingUnitsAndDanger(damagedFriendlyHealableUnits, distToDamagedFriendlyHealableUnit);
 
         // attackLoc update
         checkForEnemyUnits(units);
@@ -1100,10 +1111,31 @@ public class Player {
     public static void runHealer(Unit unit) {
         boolean healDone = tryToHeal(unit);
 
-        // move to friendly unit
+        // move to damaged friendly healable unit
         if (!healDone) {
-            // Kappa. Just move to tendency for now.
-            moveToTendency(unit);
+            tryMoveToLoc(unit, distToDamagedFriendlyHealableUnit);
+        } else {
+            // if you're too close, try to move back
+            if (unit.location().isOnMap() && gc.isMoveReady(unit.id())) {
+                MapLocation loc = unit.location().mapLocation();
+                if (attackDistanceToEnemy[loc.getY()][loc.getX()] <= 100) {
+                    int best = -1, bestDist = -1;
+                    for (int i = 0; i < 8; i++) {
+                        if (gc.canMove(unit.id(), directions[i])) {
+                            MapLocation other = loc.add(directions[i]);
+                            int attackDist = attackDistanceToEnemy[other.getY()][other.getX()];
+                            if (best == -1 || attackDist > bestDist) {
+                                bestDist = attackDist;
+                                best = i;
+                            }
+                        }
+                    }
+                    if (best != -1) {
+                        //System.out.println("healer moving back!");
+                        doMoveRobot(unit, directions[best]);
+                    }
+                }
+            }
         }
 
         if (!healDone) {
@@ -1179,7 +1211,7 @@ public class Player {
 
     private static boolean tryMoveToLoc (Unit unit, int distArray[][]) {
 
-        if (!gc.isMoveReady(unit.id())) {
+        if (!unit.location().isOnMap() || !gc.isMoveReady(unit.id())) {
             return false;
         }
 
@@ -1506,5 +1538,13 @@ public class Player {
                 unitType == UnitType.Knight ||
                 unitType == UnitType.Mage ||
                 unitType == UnitType.Healer;
+    }
+
+    public static boolean isHealableUnitType(UnitType unitType) {
+        return unitType == UnitType.Ranger ||
+                unitType == UnitType.Knight ||
+                unitType == UnitType.Mage ||
+                unitType == UnitType.Healer ||
+                unitType == UnitType.Worker;
     }
 }
