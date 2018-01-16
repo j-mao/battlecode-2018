@@ -140,6 +140,18 @@ public class Player {
     public static int goodPositionsXList[];
     public static int goodPositionsYList[];
 
+    public static int lastKnownKarboniteAmount[][] = new int[55][55];
+    public static int distToKarbonite[][] = new int[55][55];
+
+    public static int distToDamagedFriendlyHealableUnit[][] = new int[55][55];
+
+    public static final int MultisourceBfsUnreachable = 999;
+
+    // whether the square is "near" enemy units
+    // currently defined as being within distance 72 of an enemy
+    public static boolean isSquareDangerous[][];
+    public static final int DangerDistanceThreshold = 72;
+
     public static final int RangerAttackRange = 50;
     // distance you have to be to be one move away from ranger attack range
     // unfortunately it's not actually the ranger's vision range which is 70, it's actually 72...
@@ -238,10 +250,13 @@ public class Player {
         goodPositionsXList = new int[height * width];
         goodPositionsYList = new int[height * width];
         manhattanDistanceToNearestEnemy = new int[height][width];
+        isSquareDangerous = new boolean[height][width];
         for (int y = 0; y < height; y++) for (int x = 0; x < width; x++) {
+            MapLocation loc = new MapLocation(gc.planet(), x, y);
             //System.out.println("checking if there's passable terrain at " + new MapLocation(gc.planet(), x, y).toString());
             //System.out.println("is passable at y = " + y + ", x = " + x + " is " + earthMap.isPassableTerrainAt(new MapLocation(gc.planet(), x, y)));
-            isPassable[y][x] = earthMap.isPassableTerrainAt(new MapLocation(gc.planet(), x, y)) != 0;
+            isPassable[y][x] = earthMap.isPassableTerrainAt(loc) != 0;
+            lastKnownKarboniteAmount[y][x] = (int)earthMap.initialKarboniteAt(loc);
         }
         VecUnit units = earthMap.getInitial_units();
         for (int i = 0; i < units.size(); i++) {
@@ -276,11 +291,18 @@ public class Player {
                 attackDistanceToEnemy[y][x] = 9999;
                 isGoodPosition[y][x] = false;
                 isGoodPositionTaken[y][x] = false;
+                isSquareDangerous[y][x] = false;
+
+                MapLocation loc = new MapLocation(gc.planet(), x, y);
+                if (gc.canSenseLocation(loc)) {
+                    lastKnownKarboniteAmount[y][x] = (int) gc.karboniteAt(loc);
+                }
             }
         }
         workerCount = 0;
         rangerCount = 0;
         healerCount = 0;
+        ArrayList<SimpleState> damagedFriendlyHealableUnits = new ArrayList<SimpleState>();
         VecUnit units = gc.units();
         for (int i = 0; i < units.size(); i++) {
             // Note: This loops through friendly AND enemy units!
@@ -291,6 +313,11 @@ public class Player {
                 if (unit.location().isOnMap()) {
                     MapLocation loc = unit.location().mapLocation();
                     hasFriendlyUnit[loc.getY()][loc.getX()] = true;
+
+                    if (isHealableUnitType(unit.unitType()) && unit.health() < unit.maxHealth()) {
+                        MapLocation damagedUnitLoc = unit.location().mapLocation();
+                        damagedFriendlyHealableUnits.add(new SimpleState(damagedUnitLoc.getY(), damagedUnitLoc.getX()));
+                    }
                 }
 
                 // friendly unit counts
@@ -301,8 +328,8 @@ public class Player {
             } else {
                 // enemy team
 
-                // calculate closest distances to enemy units
-                if (unit.location().isOnMap()) {
+                // calculate closest distances to enemy fighter units
+                if (unit.location().isOnMap() && isFighterUnitType(unit.unitType())) {
                     MapLocation loc = unit.location().mapLocation();
                     int locY = loc.getY(), locX = loc.getX();
                     for (int y = locY - 10; y <= locY + 10; y++) {
@@ -327,6 +354,11 @@ public class Player {
                 //System.out.println("good position at " + y + " " + x);
                 numGoodPositions++;
             }
+
+            // also calculate dangerous squares
+            if (attackDistanceToEnemy[y][x] <= DangerDistanceThreshold) {
+                isSquareDangerous[y][x] = true;
+            }
         }
 
         allMyUnits.clear();
@@ -335,6 +367,19 @@ public class Player {
         }
 
         calculateManhattanDistancesToClosestEnemies(units);
+
+        // calculate distances from all workers to closest karbonite
+        ArrayList<SimpleState> karboniteLocs = new ArrayList<SimpleState>();
+        for (int y = 0; y < height; y++) for (int x = 0; x < width; x++) {
+            if (!isSquareDangerous[y][x] && lastKnownKarboniteAmount[y][x] > 0) {
+                karboniteLocs.add(new SimpleState(y, x));
+            }
+        }
+        multisourceBfsAvoidingUnitsAndDanger(karboniteLocs, distToKarbonite);
+
+        // calculate distances to damaged healable friendly units
+        multisourceBfsAvoidingUnitsAndDanger(damagedFriendlyHealableUnits, distToDamagedFriendlyHealableUnit);
+
     }
 
     public static void doMoveRobot(Unit unit, Direction dir) {
@@ -427,6 +472,10 @@ public class Player {
     public static void runWorker(Unit unit) {
         boolean doneAction = false;
         boolean doneMovement = false;
+
+        if (!unit.location().isOnMap()) {
+            doneMovement = true;
+        }
 
         // try to replicate
         // TODO: limit to 8 workers
@@ -565,27 +614,27 @@ public class Player {
         // otherwise, if you have 3 complete factories, try to move towards minerals
         // TODO: make this >= 3 thing better
         // TODO: ie make it not horrible in special case maps LuL
-        if (!doneMovement && factoryCount - factoriesBeingBuilt.size() >= 3) {
-            // TODO: unify bfs logic so that you don't unnecessarily call it multiple times
-            bfs(unit.location().mapLocation(), 1);
-
-            if (bfsClosestKarbonite != null) {
-                Direction dir = directions[bfsDirectionIndexTo[bfsClosestKarbonite.getY()][bfsClosestKarbonite.getX()]];
-
-                //System.out.println("worker moving towards minerals!");
-                if (gc.isMoveReady(unit.id()) && gc.canMove(unit.id(), dir)) {
-                    doMoveRobot(unit, dir);
-                }
+        if (!doneMovement && unit.location().isOnMap() && factoryCount - factoriesBeingBuilt.size() >= 3) {
+            MapLocation loc = unit.location().mapLocation();
+            if (distToKarbonite[loc.getY()][loc.getX()] != MultisourceBfsUnreachable) {
+                tryMoveToLoc(unit, distToKarbonite);
+                doneMovement = true;
             }
         }
 
-        // otherwise move randomly
-        if (!doneMovement) {
-            Direction dir = directions[rand.nextInt(8)];
-
-            // Most methods on gc take unit IDs, instead of the unit objects themselves.
-            if (gc.isMoveReady(unit.id()) && gc.canMove(unit.id(), dir)) {
-                doMoveRobot(unit, dir);
+        // otherwise move randomly to a not-dangerous square
+        if (!doneMovement && unit.location().isOnMap() && gc.isMoveReady(unit.id())) {
+            shuffleDirOrder();
+            for (int i = 0; i < 8; i++) {
+                Direction dir = directions[randDirOrder[i]];
+                MapLocation loc = unit.location().mapLocation().add(dir);
+                if (0 <= loc.getY() && loc.getY() < height &&
+                        0 <= loc.getX() && loc.getX() < width &&
+                        !isSquareDangerous[loc.getY()][loc.getX()] &&
+                        gc.canMove(unit.id(), dir)) {
+                    doMoveRobot(unit, dir);
+                    break;
+                }
             }
         }
 
@@ -734,7 +783,7 @@ public class Player {
                     int x = closestFreeGoodPosition.getX();
                     isGoodPositionTaken[y][x] = true;
                     //System.out.println("I'm at " + unit.location().mapLocation().toString() + " and I'm moving to good location " + closestFreeGoodPosition.toString());
-                    tryMoveToLoc(unit, closestFreeGoodPosition);
+                    tryMoveToLoc(unit, dis[closestFreeGoodPosition.getY()][closestFreeGoodPosition.getX()]);
                     doneMove = true;
                 }
 
@@ -809,10 +858,31 @@ public class Player {
     public static void runHealer(Unit unit) {
         boolean healDone = tryToHeal(unit);
 
-        // move to friendly unit
+        // move to damaged friendly healable unit
         if (!healDone) {
-            // Kappa. Just move to tendency for now.
-            moveToTendency(unit);
+            tryMoveToLoc(unit, distToDamagedFriendlyHealableUnit);
+        } else {
+            // if you're too close, try to move back
+            if (unit.location().isOnMap() && gc.isMoveReady(unit.id())) {
+                MapLocation loc = unit.location().mapLocation();
+                if (attackDistanceToEnemy[loc.getY()][loc.getX()] <= 100) {
+                    int best = -1, bestDist = -1;
+                    for (int i = 0; i < 8; i++) {
+                        if (gc.canMove(unit.id(), directions[i])) {
+                            MapLocation other = loc.add(directions[i]);
+                            int attackDist = attackDistanceToEnemy[other.getY()][other.getX()];
+                            if (best == -1 || attackDist > bestDist) {
+                                bestDist = attackDist;
+                                best = i;
+                            }
+                        }
+                    }
+                    if (best != -1) {
+                        //System.out.println("healer moving back!");
+                        doMoveRobot(unit, directions[best]);
+                    }
+                }
+            }
         }
 
         if (!healDone) {
@@ -886,22 +956,20 @@ public class Player {
         }
     }
 
-    private static boolean tryMoveToLoc (Unit unit, MapLocation to) {
+    private static boolean tryMoveToLoc (Unit unit, int distArray[][]) {
 
-        if (!gc.isMoveReady(unit.id())) {
+        if (!unit.location().isOnMap() || !gc.isMoveReady(unit.id())) {
             return false;
         }
 
         int myY = unit.location().mapLocation().getY();
         int myX = unit.location().mapLocation().getX();
-        int toX = to.getX();
-        int toY = to.getY();
         int bestDist = -1;
         int bestDir = -1;
 
         for (int i = 0; i < 8; i++) {
             if (gc.canMove(unit.id(), directions[i])) {
-                int tmpDist = dis[toY][toX][myY + dy[i]][myX + dx[i]];
+                int tmpDist = distArray[myY + dy[i]][myX + dx[i]];
                 if (bestDist == -1 || tmpDist < bestDist) {
                     bestDist = tmpDist;
                     bestDir = i;
@@ -913,7 +981,7 @@ public class Player {
             return false;
         }
 
-        int myDis = dis[toY][toX][myY][myX];
+        int myDis = distArray[myY][myX];
         if (bestDist < myDis) {
             doMoveRobot(unit, directions[bestDir]);
         } else if (bestDist == myDis) {
@@ -988,7 +1056,7 @@ public class Player {
                 bestLoc = attackLocs.get(i);
             }
         }
-        return tryMoveToLoc(unit, bestLoc);
+        return tryMoveToLoc(unit, dis[bestLoc.getY()][bestLoc.getX()]);
     }
 
     public static void moveToTendency(Unit unit) {
@@ -1117,20 +1185,81 @@ public class Player {
         }
     }
 
+    public static int getClosestFreeGoodPositionCandidates[] = new int[50*50 + 5];
     public static MapLocation getClosestFreeGoodPosition(int y, int x) {
-        int best = -1, bestDis = 999;
+        int bestDis = 999;
+        int candidates = 0;
         for (int i = 0; i < numGoodPositions; i++) {
             int curY = goodPositionsYList[i];
             int curX = goodPositionsXList[i];
-            if (!isGoodPositionTaken[curY][curX] && (best == -1 || dis[y][x][curY][curX] < bestDis)) {
-                best = i;
-                bestDis = dis[y][x][curY][curX];
+            if (!isGoodPositionTaken[curY][curX] && !hasFriendlyUnit[curY][curX]) {
+                if (candidates == 0 || dis[y][x][curY][curX] < bestDis) {
+                    getClosestFreeGoodPositionCandidates[0] = i;
+                    candidates = 1;
+                    bestDis = dis[y][x][curY][curX];
+                } else if (dis[y][x][curY][curX] == bestDis) {
+                    getClosestFreeGoodPositionCandidates[candidates] = i;
+                    candidates++;
+                }
             }
         }
-        if (best == -1) {
+
+        if (candidates == 0) {
             return null;
         } else {
+            int best = getClosestFreeGoodPositionCandidates[rand.nextInt(candidates)];
             return new MapLocation(gc.planet(), goodPositionsXList[best], goodPositionsYList[best]);
         }
+    }
+
+    // finds the shortest distance to all squares from an array of starting locations
+    // unreachable squares get distance MultisourceBfsUnreachable
+    // NOTE: DOES NOT allow movement through friendly units
+    // NOTE: DOES NOT allow movement through dangerous squares (as defined by isSquareDangerous[][])
+    public static void multisourceBfsAvoidingUnitsAndDanger(ArrayList<SimpleState> startingLocs, int resultArr[][]) {
+        for (int y = 0; y < height; y++) for (int x = 0; x < width; x++) {
+            resultArr[y][x] = MultisourceBfsUnreachable;
+        }
+        Queue<SimpleState> queue = new LinkedList<>();
+
+        for (int i = 0; i < startingLocs.size(); i++) {
+            SimpleState loc = startingLocs.get(i);
+            resultArr[loc.y][loc.x] = 0;
+            queue.add(new SimpleState(loc.y, loc.x));
+        }
+
+        while (!queue.isEmpty()) {
+            SimpleState cur = queue.remove();
+
+            for (int d = 0; d < 8; d++) {
+                int ny = cur.y + dy[d];
+                int nx = cur.x + dx[d];
+                if (0 <= ny && ny < height && 0 <= nx && nx < width &&
+                        isPassable[ny][nx] && !isSquareDangerous[ny][nx] && resultArr[ny][nx] == MultisourceBfsUnreachable) {
+                    resultArr[ny][nx] = resultArr[cur.y][cur.x] + 1;
+
+                    // if the next square has a friendly unit, mark down the distance to that square but don't continue the bfs
+                    // through that square
+                    if (!hasFriendlyUnit[ny][nx]) {
+                        queue.add(new SimpleState(ny, nx));
+                    }
+                }
+            }
+        }
+    }
+
+    public static boolean isFighterUnitType(UnitType unitType) {
+        return unitType == UnitType.Ranger ||
+                unitType == UnitType.Knight ||
+                unitType == UnitType.Mage ||
+                unitType == UnitType.Healer;
+    }
+
+    public static boolean isHealableUnitType(UnitType unitType) {
+        return unitType == UnitType.Ranger ||
+                unitType == UnitType.Knight ||
+                unitType == UnitType.Mage ||
+                unitType == UnitType.Healer ||
+                unitType == UnitType.Worker;
     }
 }
