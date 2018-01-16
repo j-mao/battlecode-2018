@@ -1103,19 +1103,29 @@ public class Player {
         }
     }
 
+    public static int getClosestFreeGoodPositionCandidates[] = new int[50*50 + 5];
     public static MapLocation getClosestFreeGoodPosition(int y, int x) {
-        int best = -1, bestDis = 999;
+        int bestDis = 999;
+        int candidates = 0;
         for (int i = 0; i < numGoodPositions; i++) {
             int curY = goodPositionsYList[i];
             int curX = goodPositionsXList[i];
-            if (!isGoodPositionTaken[curY][curX] && (best == -1 || dis[y][x][curY][curX] < bestDis)) {
-                best = i;
-                bestDis = dis[y][x][curY][curX];
+            if (!isGoodPositionTaken[curY][curX] && !hasFriendlyUnit[curY][curX]) {
+                if (candidates == 0 || dis[y][x][curY][curX] < bestDis) {
+                    getClosestFreeGoodPositionCandidates[0] = i;
+                    candidates = 1;
+                    bestDis = dis[y][x][curY][curX];
+                } else if (dis[y][x][curY][curX] == bestDis) {
+                    getClosestFreeGoodPositionCandidates[candidates] = i;
+                    candidates++;
+                }
             }
         }
-        if (best == -1) {
+
+        if (candidates == 0) {
             return null;
         } else {
+            int best = getClosestFreeGoodPositionCandidates[rand.nextInt(candidates)];
             return new MapLocation(gc.planet(), goodPositionsXList[best], goodPositionsYList[best]);
         }
     }
