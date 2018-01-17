@@ -2016,7 +2016,14 @@ public class Player {
         }
 
         //System.out.println("worker at " + loc.toString() + " considering replicating with " + nearbyKarbonite + " karbonite nearby and " + nearbyWorkers + " nearby workers");
-        return nearbyKarbonite > 25 * (nearbyWorkers + 1);
+        boolean worthReplicating = nearbyKarbonite > 25 * (nearbyWorkers + 1);
+
+        // if still setting up, we can afford more leniency
+        if (numFactories + numFactoryBlueprints < 3 && nearbyKarbonite > 19 * (nearbyWorkers + 1) && nearbyWorkers < 7) {
+            worthReplicating = true;
+        }
+
+        return worthReplicating;
     }
 
     public static boolean bfsTowardsBlueprint(Unit unit) {
