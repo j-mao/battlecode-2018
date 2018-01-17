@@ -426,7 +426,7 @@ public class Player {
 
                 } else if (unit.unitType() == UnitType.Rocket) {
 
-                    if (unit.structureIsBuilt() == 0) {
+                    if (unit.structureIsBuilt() != 0) {
 
                         if (unit.structureGarrison().size() < unit.structureMaxCapacity()) {
                             rocketsReady.add(unit);
@@ -694,25 +694,47 @@ public class Player {
 
         // actions
         boolean doneAction = false;
-        if (!doneAction && unit.abilityHeat() < 10 &&
-                ((numFactories + numFactoryBlueprints > 0 && numWorkers < 6) ||
-                        distToKarbonite[loc.getY()][loc.getX()] < IsEnoughResourcesNearbySearchDist && isEnoughResourcesNearby(unit))) {
+
+        boolean replicateForBuilding = (numFactories + numFactoryBlueprints > 0 && numWorkers < 6);
+        boolean replicateForHarvesting = distToKarbonite[loc.getY()][loc.getX()] < IsEnoughResourcesNearbySearchDist && isEnoughResourcesNearby(unit);
+
+        boolean canRocket = (gc.researchInfo().getLevel(UnitType.Rocket) >= 1);
+        boolean lowRockets = ((int) rocketsReady.size() + numRocketBlueprints < maxConcurrentRocketsReady);
+        boolean needToSave = (gc.karbonite() < 75 + 15);
+
+        boolean shouldReplicate = (replicateForBuilding || replicateForHarvesting);
+
+        if (canRocket && lowRockets && needToSave) {
+            shouldReplicate = false;
+        }
+
+        if (!doneAction && unit.abilityHeat() < 10 && shouldReplicate) {
             // try to replicate
             if (doReplicate(unit)) {
                 doneAction = true;
             }
         }
-        if (!doneAction && gc.karbonite() > 100 &&
-                (numFactories + numFactoryBlueprints < 3 || gc.karbonite() > 150)) {
+
+        if (!doneAction) {
+            if (gc.karbonite() >= 100 &&
+                    (numFactories + numFactoryBlueprints < 3 ||
+                            gc.karbonite() >= 130 + (numFactories + numFactoryBlueprints - 3) * 15)) {
+
+                if (doBlueprint(unit, UnitType.Factory)) {
+                    doneAction = true;
+                }
+            } else if (canRocket && lowRockets) {
+
+                if (doBlueprint(unit, UnitType.Rocket)) {
+                    doneAction = true;
+                }
+
+            }
+
             // can blueprint factory/rocket and want to blueprint factory/rocket...
 
-            // TODO: add decision making on when to build factory, and when to build rocket...
-
-            // then blueprint
-            if (doBlueprint(unit)) {
-                doneAction = true;
-            }
             // TODO: try to move to a location with space if the adjacent spaces are too cramped to build a blueprint
+
         }
 
         if (doBuild(unit)) {
@@ -922,39 +944,39 @@ public class Player {
 
         // if there is a blueprint somewhere, try to move towards it to help build it
         if (!doneMovement) {
-	        if (!factoriesBeingBuilt.isEmpty() && numFactories < 3) {
-	            // set done to true so we don't move randomly
-	            doneMovement = true;
+            if (!factoriesBeingBuilt.isEmpty() && numFactories < 3) {
+                // set done to true so we don't move randomly
+                doneMovement = true;
 
-	            // bfs to within distance 1 of every square because we want to move within distance 1 of a factory
-	            bfs(unit.location().mapLocation(), 1);
+                // bfs to within distance 1 of every square because we want to move within distance 1 of a factory
+                bfs(unit.location().mapLocation(), 1);
 
-	            // TODO: change this to closest factory
-	            Unit factory = factoriesBeingBuilt.get(0);
-	            MapLocation loc = factory.location().mapLocation();
-	            Direction dir = directions[bfsDirectionIndexTo[loc.getY()][loc.getX()]];
-	            //System.out.println("worker moving to factory in dir " + dir.toString());
+                // TODO: change this to closest factory
+                Unit factory = factoriesBeingBuilt.get(0);
+                MapLocation loc = factory.location().mapLocation();
+                Direction dir = directions[bfsDirectionIndexTo[loc.getY()][loc.getX()]];
+                //System.out.println("worker moving to factory in dir " + dir.toString());
 
-	            if (gc.isMoveReady(unit.id()) && gc.canMove(unit.id(), dir)) {
-	                doMoveRobot(unit, dir);
-	            }
-	        } else if (!rocketsBeingBuilt.isEmpty() && (int) rocketsReady.size() < maxConcurrentRocketsReady) {
-	        	// set done to true so we don't move randomly
-	            doneMovement = true;
+                if (gc.isMoveReady(unit.id()) && gc.canMove(unit.id(), dir)) {
+                    doMoveRobot(unit, dir);
+                }
+            } else if (!rocketsBeingBuilt.isEmpty() && (int) rocketsReady.size() < maxConcurrentRocketsReady) {
+                // set done to true so we don't move randomly
+                doneMovement = true;
 
-	            // bfs to within distance 1 of every square because we want to move within distance 1 of a rocket
-	            bfs(unit.location().mapLocation(), 1);
+                // bfs to within distance 1 of every square because we want to move within distance 1 of a rocket
+                bfs(unit.location().mapLocation(), 1);
 
-	            // TODO: change this to closest rocket
-	            Unit rocket = rocketsBeingBuilt.get(0);
-	            MapLocation loc = rocket.location().mapLocation();
-	            Direction dir = directions[bfsDirectionIndexTo[loc.getY()][loc.getX()]];
-	            //System.out.println("worker moving to rocket in dir " + dir.toString());
+                // TODO: change this to closest rocket
+                Unit rocket = rocketsBeingBuilt.get(0);
+                MapLocation loc = rocket.location().mapLocation();
+                Direction dir = directions[bfsDirectionIndexTo[loc.getY()][loc.getX()]];
+                //System.out.println("worker moving to rocket in dir " + dir.toString());
 
-	            if (gc.isMoveReady(unit.id()) && gc.canMove(unit.id(), dir)) {
-	                doMoveRobot(unit, dir);
-	            }
-	        }
+                if (gc.isMoveReady(unit.id()) && gc.canMove(unit.id(), dir)) {
+                    doMoveRobot(unit, dir);
+                }
+            }
         }
 
 
@@ -1061,8 +1083,10 @@ public class Player {
 
         boolean fullRocket = (unit.structureGarrison().size() == unit.structureMaxCapacity());
         boolean aboutToFlood = (roundNum >= 749);
-        boolean notWorthWaiting = (roundNum >= 649 && gc.orbitPattern().duration(roundNum)+roundNum <= gc.orbitPattern().duration(roundNum+1)+roundNum+1);
+        boolean notWorthWaiting = (roundNum >= 649 || gc.orbitPattern().duration(roundNum)+roundNum <= gc.orbitPattern().duration(roundNum+1)+roundNum+1);
         boolean dangerOfDestruction = (unit.health() <= 70);
+
+        // System.out.printf("I am a rocket and I think it isn't worth waiting: %d, full? %d\n", notWorthWaiting ? 1 : 0, fullRocket ? 1 : 0);
 
         if (dangerOfDestruction || aboutToFlood || (fullRocket && notWorthWaiting)) {
             MapLocation where = null;
@@ -1837,15 +1861,9 @@ public class Player {
         return false;
     }
 
-    public static boolean doBlueprint(Unit unit) {
+    public static boolean doBlueprint(Unit unit, UnitType toBlueprint) {
         shuffleDirOrder();
         int best = -1, bestSpace = -1;
-
-        UnitType toBlueprint = UnitType.Factory;
-        if (gc.researchInfo().getLevel(UnitType.Rocket) >= 1) {
-            System.out.println("I CAN NOW TRY TO BUILD A ROCKET");
-            toBlueprint = UnitType.Rocket;
-        }
 
         if (toBlueprint == UnitType.Factory) {
             // Find blueprint direction such that the factory will have the most free space around it
