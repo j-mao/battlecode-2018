@@ -716,7 +716,9 @@ public class Player {
         }
 
         if (!doneAction) {
-            if (numFactories + numFactoryBlueprints < 3) {
+            if (gc.karbonite() >= 100 &&
+                    (numFactories + numFactoryBlueprints < 3 ||
+                            gc.karbonite() >= 130 + (numFactories + numFactoryBlueprints - 3) * 15)) {
 
                 if (doBlueprint(unit, UnitType.Factory)) {
                     doneAction = true;
