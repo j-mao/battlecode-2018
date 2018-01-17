@@ -73,8 +73,6 @@ public class Player {
             case Knight:
             case Mage:
             case Healer:
-            // Worker before factory so that workers can finish a currently building factory before the factory runs
-            case Worker:
                 if (unit.location().isOnMap()) {
                     MapLocation loc = unit.location().mapLocation();
                     // give priority to units that are closer to enemies
@@ -84,12 +82,24 @@ public class Player {
                 } else {
                     return 1999;
                 }
+            // Worker before factory so that workers can finish a currently building factory before the factory runs
+            case Worker:
+                if (unit.location().isOnMap()) {
+                    MapLocation loc = unit.location().mapLocation();
+                    // give priority to workers that are further from enemies
+                    // this is a lazy hack to try and make workers not build factories near enemies
+                    // NOTE: the default value for manhattanDistanceToNearestEnemy (ie the value when there are no nearby
+                    //   enemies) should be less than 999 so that priorities don't get mixed up!
+                    return 2999 - manhattanDistanceToNearestEnemy[loc.getY()][loc.getX()];
+                } else {
+                    return 3999;
+                }
             // Factory before rocket so that factory can make a unit, then unit can get in rocket before the rocket runs
             // Edit: not actually sure if you can actually do that lol... whatever.
             case Factory:
-                return 2000;
+                return 4000;
             case Rocket:
-                return 3000;
+                return 5000;
         }
         System.out.println("ERROR: getUnitOrderPriority() does not recognise this unit type!");
         return 9999;
@@ -1108,7 +1118,7 @@ public class Player {
         UnitType unitTypeToBuild = UnitType.Ranger;
 
         // TODO: change proportion based on current research levels
-        if (numRangers >= 4 * numHealers + 4) {
+        if (numRangers >= 3 * numHealers + 4) {
             unitTypeToBuild = UnitType.Healer;
         }
 
