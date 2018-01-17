@@ -1107,13 +1107,16 @@ public class Player {
     public static void runFactory (Unit unit) {
         UnitType unitTypeToBuild = UnitType.Ranger;
 
-        // TODO: change proportion based on current research levels
-        if (numRangers >= 4 * numHealers + 4) {
-            unitTypeToBuild = UnitType.Healer;
-        }
+        MapLocation loc = unit.location().mapLocation();
 
-        if (numWorkers == 0) {
+        // TODO: change proportion based on current research levels
+        if (isSquareDangerous[loc.getY()][loc.getX()]) {
+            // dangerous square. Just build rangers, healers will just get instantly killed.
+            unitTypeToBuild = UnitType.Ranger;
+        } else if (numWorkers == 0) {
             unitTypeToBuild = UnitType.Worker;
+        } else if (numRangers >= 2 * numHealers + 4) {
+            unitTypeToBuild = UnitType.Healer;
         }
 
         boolean canRocket = (gc.researchInfo().getLevel(UnitType.Rocket) >= 1);

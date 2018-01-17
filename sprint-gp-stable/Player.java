@@ -1863,7 +1863,7 @@ public class Player {
 
     public static boolean doBlueprint(Unit unit, UnitType toBlueprint) {
         shuffleDirOrder();
-        int best = -1, bestSpace = -1;
+        int best = -1, bestAttackDistance = -1, bestSpace = -1;
 
         if (toBlueprint == UnitType.Factory) {
             // Find blueprint direction such that the factory will have the most free space around it
@@ -1876,6 +1876,29 @@ public class Player {
                     }
                 }
             }
+
+            int wouldBeBest = best;
+
+            // Find blueprint direction such that the factory will have the most free space around it
+            // Don't blueprint in a location that's close to enemies
+            for (int i = 0; i < 8; i++) {
+                MapLocation loc = unit.location().mapLocation().add(directions[randDirOrder[i]]);
+                if (0 <= loc.getY() && loc.getY() < height &&
+                        0 <= loc.getX() && loc.getX() < width) {
+                    int attackDistance = attackDistanceToEnemy[loc.getY()][loc.getX()];
+                    // we want at least 5 squares around the factory
+                    int space = Math.min(getSpaceAround(loc), 5);
+                    if ((space > bestSpace ||
+                            (space == bestSpace && attackDistance > bestAttackDistance)) &&
+                            gc.canBlueprint(unit.id(), toBlueprint, directions[randDirOrder[i]])) {
+                        bestAttackDistance = attackDistance;
+                        bestSpace = space;
+                        best = i;
+                    }
+                }
+            }
+
+            System.out.println("worker at " + unit.location().mapLocation() + " before decision " + wouldBeBest + " after decision + " + best);
         } else {
             // TODO: decide if we want Rockets to have minimal space like factories (see above)
             // currently this runs the same code as for Factory
