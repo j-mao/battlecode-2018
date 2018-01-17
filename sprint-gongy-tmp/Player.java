@@ -15,6 +15,10 @@ public class Player {
 
     public static int roundNum;
 
+    public static boolean raceToMars = false;
+
+    public static int maxConcurrentRocketsReady = 2;
+
     public static int[][][][] dis = new int[55][55][55][55];
 
     public static int[][] cacheKarboniteAt = new int[55][55];
@@ -112,6 +116,7 @@ public class Player {
     // factories that are currently blueprints
     public static ArrayList<Unit> factoriesBeingBuilt = new ArrayList<Unit>();
     public static ArrayList<Unit> rocketsBeingBuilt = new ArrayList<Unit>();
+    public static ArrayList<Unit> rocketsReady = new ArrayList<Unit>();
     // Store this list of all our units ourselves, so that we can add to it when we create units and use those new units
     // immediately.
     public static Comparator<Unit> unitOrderComparator = new UnitOrderComparator();
@@ -193,7 +198,7 @@ public class Player {
         if (myPlanet == Planet.Mars) {
             
             while (true) {
-                System.out.println("Current round: " + roundNum);
+                //System.out.println("Current round: " + roundNum);
 
                 VecUnit units = gc.myUnits();
                 initTurn(units);
@@ -239,10 +244,14 @@ public class Player {
             gc.queueResearch(UnitType.Rocket);
 
             while (true) {
-                System.out.println("Current round: " + roundNum);
+                //System.out.println("Current round: " + roundNum);
 
                 VecUnit units = gc.myUnits();
                 initTurn(units);
+
+                if (roundNum >= 400) {
+                    startRacingToMars();
+                }
 
                 while (!allMyUnits.isEmpty()) {
                     Unit unit = allMyUnits.remove();
@@ -373,6 +382,8 @@ public class Player {
         numWorkers = 0; numKnights = 0; numRangers = 0; numMages = 0; numHealers = 0; numFactories = 0; numRockets = 0;
         numFactoryBlueprints = 0; numRocketBlueprints = 0;
 
+        rocketsReady.clear();
+
         ArrayList<SimpleState> damagedFriendlyHealableUnits = new ArrayList<SimpleState>();
         VecUnit units = gc.units();
         for (int i = 0; i < units.size(); i++) {
@@ -403,8 +414,14 @@ public class Player {
 
                 } else if (unit.unitType() == UnitType.Rocket) {
 
-                    if (unit.structureIsBuilt() == 0) numRockets++;
-                    else numRocketBlueprints++;
+                    if (unit.structureIsBuilt() == 0) {
+
+                        if (unit.structureGarrison().size() < unit.structureMaxCapacity()) {
+                            rocketsReady.add(unit);
+                        }
+
+                        numRockets++;
+                    } else numRocketBlueprints++;
 
                 } else {
                     addTypeToFriendlyUnitCount(unit.unitType());
@@ -478,6 +495,15 @@ public class Player {
             System.out.print("Rockets="+numRockets+"built+"+numRocketBlueprints+"unbuilt; ");
             System.out.println();
         }
+    }
+
+    public static void startRacingToMars () {
+        if (raceToMars || myPlanet == Planet.Mars) {
+            return;
+        }
+
+        raceToMars = true;
+        maxConcurrentRocketsReady = 5;
     }
 
     public static void doMoveRobot(Unit unit, Direction dir) {
@@ -605,7 +631,19 @@ public class Player {
         // TODO: make this logic better. e.g. we might need money for a factory in the future
         // TODO: Find out where cost constants are and replay this "100 + 15" with those xd.
 
-        boolean shouldReplicate = (numWorkers<7 && gc.karbonite() >= 100+15);
+        int earthWorkerLimit = raceToMars ? 20 : 7;
+
+        boolean shouldReplicate = false;
+
+        if (!raceToMars) {
+            if (numWorkers<earthWorkerLimit && gc.karbonite() >= 100+15) {
+                shouldReplicate = true;
+            }
+        } else {
+            if (gc.karbonite() >= 75+15) {
+                shouldReplicate = true;
+            }
+        }
 
         if (shouldReplicate) {
             // try to replicate next to currently building factory
@@ -672,6 +710,7 @@ public class Player {
                         } else {
                             for (int j = 0; j < rocketsBeingBuilt.size(); j++) {
                                 if (rocketsBeingBuilt.get(j).location().mapLocation().equals(other.location().mapLocation())) {
+                                    rocketsReady.add(other);
                                     rocketsBeingBuilt.remove(j);
                                     foundIt = true;
                                     break;
@@ -699,7 +738,7 @@ public class Player {
 
                 UnitType toBlueprint = UnitType.Factory;
                 if (gc.researchInfo().getLevel(UnitType.Rocket) >= 1) {
-                    System.out.println("I CAN NOW TRY TO BUILD A ROCKET");
+                    // System.out.println("I CAN NOW TRY TO BUILD A ROCKET");
                     toBlueprint = UnitType.Rocket;
                 }
 
@@ -732,7 +771,8 @@ public class Player {
 
                     Direction dir = directions[randDirOrder[best]];
 
-                    System.out.println("blueprinting in direction " + dir.toString() + " with space " + bestSpace);
+                    // System.out.println("blueprinting in direction " + dir.toString() + " with space " + bestSpace);
+                    
                     gc.blueprint(unit.id(), toBlueprint, dir);
                     MapLocation loc = unit.location().mapLocation().add(dir);
                     hasFriendlyUnit[loc.getY()][loc.getX()] = true;
@@ -782,7 +822,7 @@ public class Player {
 	            if (gc.isMoveReady(unit.id()) && gc.canMove(unit.id(), dir)) {
 	                doMoveRobot(unit, dir);
 	            }
-	        } else if (!rocketsBeingBuilt.isEmpty() && numRockets < 2) {
+	        } else if (!rocketsBeingBuilt.isEmpty() && (int) rocketsReady.size() < maxConcurrentRocketsReady) {
 	        	// set done to true so we don't move randomly
 	            doneMovement = true;
 
@@ -900,12 +940,11 @@ public class Player {
             return;
         }
 
-
         tryToLoadRocket(unit);
 
         boolean fullRocket = (unit.structureGarrison().size() == unit.structureMaxCapacity());
         boolean aboutToFlood = (roundNum >= 749);
-        boolean notWorthWaiting = gc.orbitPattern().duration(roundNum)+roundNum <= gc.orbitPattern().duration(roundNum+1)+roundNum+1;
+        boolean notWorthWaiting = (roundNum >= 649 && gc.orbitPattern().duration(roundNum)+roundNum <= gc.orbitPattern().duration(roundNum+1)+roundNum+1);
         boolean dangerOfDestruction = (unit.health() <= 70);
 
         if (dangerOfDestruction || aboutToFlood || (fullRocket && notWorthWaiting)) {
@@ -915,6 +954,7 @@ public class Player {
                 int landY = (int)(Math.abs(rand.nextInt())%MarsMap.getHeight());
                 where = new MapLocation(Planet.Mars, landX, landY);
             } while (MarsMap.isPassableTerrainAt(where) == 0);
+
             gc.launchRocket(unit.id(), where);
         }
     }
@@ -931,8 +971,12 @@ public class Player {
             unitTypeToBuild = UnitType.Healer;
         }
 
+        if (numWorkers == 0) {
+            unitTypeToBuild = UnitType.Worker;
+        }
+
         boolean canRocket = (gc.researchInfo().getLevel(UnitType.Rocket) >= 1);
-        boolean lowRockets = (numRockets + numRocketBlueprints < 2);
+        boolean lowRockets = ((int) rocketsReady.size() + numRocketBlueprints < maxConcurrentRocketsReady);
         int unitCost = (unitTypeToBuild == UnitType.Worker ? 25 : 20);
         boolean needToSave = (gc.karbonite() < 75 + unitCost);
 
@@ -1013,6 +1057,12 @@ public class Player {
 
             if (!doneMove) {
                 // otherwise, search for a good destination to move towards
+
+                if (raceToMars && !rocketsReady.isEmpty()) {
+                    doneMove = true;
+
+                    tryToMoveToRocket(unit);
+                }
 
                 // check if current location is good position
                 if (!doneMove && isGoodPosition[myY][myX]) {
@@ -1130,10 +1180,11 @@ public class Player {
 
     public static void runHealer(Unit unit) {
         boolean healDone = tryToHeal(unit);
+        boolean moveDone = false;
 
         // move to damaged friendly healable unit
         if (!healDone) {
-            tryMoveToLoc(unit, distToDamagedFriendlyHealableUnit);
+            moveDone = tryMoveToLoc(unit, distToDamagedFriendlyHealableUnit);
         } else {
             // if you're too close, try to move back
             if (unit.location().isOnMap() && gc.isMoveReady(unit.id())) {
@@ -1152,15 +1203,48 @@ public class Player {
                     }
                     if (best != -1) {
                         //System.out.println("healer moving back!");
+                        moveDone = true;
                         doMoveRobot(unit, directions[best]);
                     }
                 }
             }
         }
 
+        if (raceToMars && !moveDone) {
+            moveDone = tryToMoveToRocket(unit);
+        }
+
         if (!healDone) {
             tryToHeal(unit);
         }
+    }
+
+    public static boolean tryToMoveToRocket (Unit unit ) {
+        // try to get to a fucking rocket as soon as possible
+
+        if (rocketsReady.isEmpty()) {
+            return false;
+        }
+
+        int fromY = unit.location().mapLocation().getY();
+        int fromX = unit.location().mapLocation().getX();
+
+        int minDist = -1;
+        int bestToY = -1;
+        int bestToX = -1;
+
+        for (Unit u : rocketsReady) {
+            int toY = u.location().mapLocation().getY();
+            int toX = u.location().mapLocation().getX();
+
+            if (minDist == -1 || dis[toY][toX][fromY][fromX] < minDist) {
+                minDist = dis[toY][toX][fromY][fromX];
+                bestToY = toY;
+                bestToX = toX;
+            }
+        }
+
+        return tryMoveToLoc(unit, dis[bestToY][bestToX]);
     }
 
     public static int getTendency(Unit unit) {
@@ -1448,6 +1532,20 @@ public class Player {
         }
     }
 
+    public static void removeTypeToFriendlyUnitCount (UnitType unitType) {
+        if (unitType == UnitType.Worker) {
+            numWorkers--;
+        } else if (unitType == UnitType.Knight) {
+            numKnights--;
+        } else if (unitType == UnitType.Ranger) {
+            numRangers--;
+        } else if (unitType == UnitType.Mage) {
+            numMages--;
+        } else if (unitType == UnitType.Healer) {
+            numHealers--;
+        }
+    }
+
     public static void addTypeToFriendlyUnitCount (UnitType unitType) {
         if (unitType == UnitType.Worker) {
             numWorkers++;
@@ -1495,22 +1593,18 @@ public class Player {
         MapLocation curLoc = unit.location().mapLocation();
 
         VecUnit loadableUnits = gc.senseNearbyUnitsByTeam(unit.location().mapLocation(), unit.visionRange(), myTeam);
-        // bring along one worker
-        if (unit.structureGarrison().size() == 0)
-        {
-            for (long i = 0;i < loadableUnits.size();i++) if (loadableUnits.get(i).unitType() == UnitType.Worker) {
-                if (gc.canLoad(unit.id(), loadableUnits.get(i).id())) {
-                    gc.load(unit.id(), loadableUnits.get(i).id());
-                    // @JERRY : I don't know what this does
-                    // loadedUnits.add(unit.id());
-                    break;
-                }
-            }
-        }
-        // bring along as many rangers as you can
-        for (long i = 0;i < loadableUnits.size();i++) if (loadableUnits.get(i).unitType() == UnitType.Ranger) {
+
+        // bring along anything
+        for (long i = 0;i < loadableUnits.size();i++) {
             if (gc.canLoad(unit.id(), loadableUnits.get(i).id())) {
+
+                if (loadableUnits.get(i).unitType() == UnitType.Worker && numWorkers <= 2) {
+                    continue;
+                }
+
+                removeTypeToFriendlyUnitCount(loadableUnits.get(i).unitType());
                 gc.load(unit.id(), loadableUnits.get(i).id());
+
                 // @JERRY : I don't know what this does
                 // loadedUnits.add(unit.id());
             }
@@ -1521,7 +1615,7 @@ public class Player {
     // unreachable squares get distance MultisourceBfsUnreachable
     // NOTE: DOES NOT allow movement through friendly units
     // NOTE: DOES NOT allow movement through dangerous squares (as defined by isSquareDangerous[][])
-    public static void multisourceBfsAvoidingUnitsAndDanger(ArrayList<SimpleState> startingLocs, int resultArr[][]) {
+    public static void multisourceBfsAvoidingUnitsAndDanger (ArrayList<SimpleState> startingLocs, int resultArr[][]) {
         for (int y = 0; y < height; y++) for (int x = 0; x < width; x++) {
             resultArr[y][x] = MultisourceBfsUnreachable;
         }
