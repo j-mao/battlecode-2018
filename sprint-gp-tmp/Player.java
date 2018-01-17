@@ -158,6 +158,8 @@ public class Player {
 
     public static int bfsTowardsBlueprintDist[][] = new int[55][55];
 
+    public static int numIdleRangers;
+
     public static final int MultisourceBfsUnreachableMax = 499;
 
     // whether the square is "near" enemy units
@@ -287,6 +289,9 @@ public class Player {
                             break;
                     }
                 }
+
+                finishTurn();
+
                 gc.nextTurn();
                 roundNum++;
             }
@@ -386,6 +391,8 @@ public class Player {
         //reset unit counts
         numWorkers = 0; numKnights = 0; numRangers = 0; numMages = 0; numHealers = 0; numFactories = 0; numRockets = 0;
         numFactoryBlueprints = 0; numRocketBlueprints = 0;
+
+        numIdleRangers = 0;
 
         rocketsReady.clear();
 
@@ -500,6 +507,10 @@ public class Player {
             System.out.print("Rockets="+numRockets+"built+"+numRocketBlueprints+"unbuilt; ");
             System.out.println();
         }
+    }
+
+    public static void finishTurn() {
+        System.out.println("" + numIdleRangers + " idle rangers");
     }
 
     public static void startRacingToMars () {
@@ -695,13 +706,13 @@ public class Player {
                 (numFactories + numFactoryBlueprints < 3 || gc.karbonite() > 150)) {
             // can blueprint factory/rocket and want to blueprint factory/rocket...
 
-            // TODO: improve decision making on when to build factory, and when to build rocket...
+            // TODO: add decision making on when to build factory, and when to build rocket...
 
             // then blueprint
             if (doBlueprint(unit)) {
                 doneAction = true;
             }
-            // TODO: try to blueprint in a location with space if the adjacent spaces are too cramped
+            // TODO: try to move to a location with space if the adjacent spaces are too cramped to build a blueprint
         }
 
         if (doBuild(unit)) {
@@ -1213,6 +1224,11 @@ public class Player {
                     //System.out.println("I'm at " + unit.location().mapLocation().toString() + " and I'm moving to good location " + closestFreeGoodPosition.toString());
                     tryMoveToLoc(unit, dis[closestFreeGoodPosition.getY()][closestFreeGoodPosition.getX()]);
                     doneMove = true;
+                }
+
+                // otherwise, if the ranger can't find a free good position, mark it as idle
+                if (!doneMove) {
+                    numIdleRangers++;
                 }
 
                 // otherwise move to attack loc
@@ -1827,7 +1843,7 @@ public class Player {
 
         UnitType toBlueprint = UnitType.Factory;
         if (gc.researchInfo().getLevel(UnitType.Rocket) >= 1) {
-            // System.out.println("I CAN NOW TRY TO BUILD A ROCKET");
+            System.out.println("I CAN NOW TRY TO BUILD A ROCKET");
             toBlueprint = UnitType.Rocket;
         }
 
