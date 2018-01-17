@@ -1081,7 +1081,7 @@ public class Player {
 
         boolean fullRocket = (unit.structureGarrison().size() == unit.structureMaxCapacity());
         boolean aboutToFlood = (roundNum >= 749);
-        boolean notWorthWaiting = (roundNum >= 649 && gc.orbitPattern().duration(roundNum)+roundNum <= gc.orbitPattern().duration(roundNum+1)+roundNum+1);
+        boolean notWorthWaiting = (roundNum >= 649 || gc.orbitPattern().duration(roundNum)+roundNum <= gc.orbitPattern().duration(roundNum+1)+roundNum+1);
         boolean dangerOfDestruction = (unit.health() <= 70);
 
         if (dangerOfDestruction || aboutToFlood || (fullRocket && notWorthWaiting)) {
