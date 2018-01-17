@@ -764,24 +764,44 @@ public class Player {
             }
         }
 
-        // if there is a factory blueprint somewhere, and you have less than 3 complete factories, try to move towards it to help build it
-        if (!doneMovement && !factoriesBeingBuilt.isEmpty() && numFactories < 3) {
-            // set done to true so we don't move randomly
-            doneMovement = true;
+        // if there is a blueprint somewhere, try to move towards it to help build it
+        if (!doneMovement) {
+	        if (!factoriesBeingBuilt.isEmpty() && numFactories < 3) {
+	            // set done to true so we don't move randomly
+	            doneMovement = true;
 
-            // bfs to within distance 1 of every square because we want to move within distance 1 of a factory
-            bfs(unit.location().mapLocation(), 1);
+	            // bfs to within distance 1 of every square because we want to move within distance 1 of a factory
+	            bfs(unit.location().mapLocation(), 1);
 
-            // TODO: change this to closest factory
-            Unit factory = factoriesBeingBuilt.get(0);
-            MapLocation loc = factory.location().mapLocation();
-            Direction dir = directions[bfsDirectionIndexTo[loc.getY()][loc.getX()]];
-            //System.out.println("worker moving to factory in dir " + dir.toString());
+	            // TODO: change this to closest factory
+	            Unit factory = factoriesBeingBuilt.get(0);
+	            MapLocation loc = factory.location().mapLocation();
+	            Direction dir = directions[bfsDirectionIndexTo[loc.getY()][loc.getX()]];
+	            //System.out.println("worker moving to factory in dir " + dir.toString());
 
-            if (gc.isMoveReady(unit.id()) && gc.canMove(unit.id(), dir)) {
-                doMoveRobot(unit, dir);
-            }
+	            if (gc.isMoveReady(unit.id()) && gc.canMove(unit.id(), dir)) {
+	                doMoveRobot(unit, dir);
+	            }
+	        } else if (!rocketsBeingBuilt.isEmpty() && numRockets < 2) {
+	        	// set done to true so we don't move randomly
+	            doneMovement = true;
+
+	            // bfs to within distance 1 of every square because we want to move within distance 1 of a rocket
+	            bfs(unit.location().mapLocation(), 1);
+
+	            // TODO: change this to closest rocket
+	            Unit rocket = rocketsBeingBuilt.get(0);
+	            MapLocation loc = rocket.location().mapLocation();
+	            Direction dir = directions[bfsDirectionIndexTo[loc.getY()][loc.getX()]];
+	            //System.out.println("worker moving to rocket in dir " + dir.toString());
+
+	            if (gc.isMoveReady(unit.id()) && gc.canMove(unit.id(), dir)) {
+	                doMoveRobot(unit, dir);
+	            }
+	        }
         }
+
+
 
         // otherwise, if you have 3 complete factories, try to move towards minerals
         // TODO: make this >= 3 thing better
