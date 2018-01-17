@@ -156,7 +156,7 @@ public class Player {
 
     public static int distToDamagedFriendlyHealableUnit[][] = new int[55][55];
 
-    public static final int MultisourceBfsUnreachable = 999;
+    public static final int MultisourceBfsUnreachableMax = 499;
 
     // whether the square is "near" enemy units
     // currently defined as being within distance 72 of an enemy
@@ -167,6 +167,9 @@ public class Player {
     // distance you have to be to be one move away from ranger attack range
     // unfortunately it's not actually the ranger's vision range which is 70, it's actually 72...
     public static final int OneMoveFromRangerAttackRange = 72;
+
+    // Distance around a worker to search for whether there is enough karbonite to be worth replicating
+    public static int IsEnoughResourcesNearbySearchDist = 8;
 
     // stats about quantities of friendly units
     static int numWorkers;
@@ -244,7 +247,7 @@ public class Player {
             gc.queueResearch(UnitType.Rocket);
 
             while (true) {
-                //System.out.println("Current round: " + roundNum);
+                System.out.println("Current round: " + roundNum);
 
                 VecUnit units = gc.myUnits();
                 initTurn(units);
@@ -615,13 +618,142 @@ public class Player {
     }
 
     public static void runEarthWorker (Unit unit) {
-        boolean doneAction = false;
-        boolean doneMovement = false;
-
         if (!unit.location().isOnMap()) {
-            doneMovement = true;
+            return;
         }
 
+        boolean doneMovement = !gc.isMoveReady(unit.id());
+
+        // movement
+        if (!doneMovement && false /* need to place factory and no adjacent good places and nearby good place */) {
+            // move towards good place
+        }
+        if (!doneMovement && isNextToBuildingFactory(unit.location().mapLocation())) {
+            // if next to blueprint, stay next to blueprint
+            doneMovement = true;
+        }
+        if (!doneMovement) {
+            // if very near a blueprint, move towards it
+
+            // TODO: change this to a custom bfs with a max distance and early exit
+            // TODO: ^^^^^^ DO THIS ^^^^^
+
+            if (!factoriesBeingBuilt.isEmpty() && numFactories < 3) {
+
+                // bfs to within distance 1 of every square because we want to move within distance 1 of a factory
+                bfs(unit.location().mapLocation(), 1);
+
+                // TODO: change this to closest factory
+                Unit factory = factoriesBeingBuilt.get(0);
+                MapLocation loc = factory.location().mapLocation();
+                Direction dir = directions[bfsDirectionIndexTo[loc.getY()][loc.getX()]];
+                //System.out.println("worker moving to factory in dir " + dir.toString());
+
+                if (gc.isMoveReady(unit.id()) && gc.canMove(unit.id(), dir)) {
+                    doMoveRobot(unit, dir);
+                    doneMovement = true;
+                }
+            } else if (false && !rocketsBeingBuilt.isEmpty() && (int) rocketsReady.size() < maxConcurrentRocketsReady) {
+
+                // bfs to within distance 1 of every square because we want to move within distance 1 of a rocket
+                bfs(unit.location().mapLocation(), 1);
+
+                // TODO: change this to closest rocket
+                Unit rocket = rocketsBeingBuilt.get(0);
+                MapLocation loc = rocket.location().mapLocation();
+                Direction dir = directions[bfsDirectionIndexTo[loc.getY()][loc.getX()]];
+                //System.out.println("worker moving to rocket in dir " + dir.toString());
+
+                if (gc.isMoveReady(unit.id()) && gc.canMove(unit.id(), dir)) {
+                    doMoveRobot(unit, dir);
+                    doneMovement = true;
+                }
+            }
+        }
+        if (!doneMovement) {
+            //  move towards karbonite
+            MapLocation loc = unit.location().mapLocation();
+            if (distToKarbonite[loc.getY()][loc.getX()] != MultisourceBfsUnreachableMax) {
+                tryMoveToLoc(unit, distToKarbonite);
+                doneMovement = true;
+            }
+        }
+        if (!doneMovement /* next to damaged structure */) {
+            // done, stay next to damaged structure
+
+            // TODO: implement this
+        }
+        if (!doneMovement /* damaged structure */) {
+            // move towards damaged structure
+
+            // TODO: implement this
+        }
+        if (!doneMovement) {
+            // otherwise move randomly to a not-dangerous square
+            shuffleDirOrder();
+            for (int i = 0; i < 8; i++) {
+                Direction dir = directions[randDirOrder[i]];
+                MapLocation loc = unit.location().mapLocation().add(dir);
+                if (0 <= loc.getY() && loc.getY() < height &&
+                        0 <= loc.getX() && loc.getX() < width &&
+                        !isSquareDangerous[loc.getY()][loc.getX()] &&
+                        gc.canMove(unit.id(), dir)) {
+                    doMoveRobot(unit, dir);
+                    break;
+                }
+            }
+        }
+
+        // update worker location after moving
+        unit = gc.unit(unit.id());
+        MapLocation loc = unit.location().mapLocation();
+
+        // actions
+        boolean doneAction = false;
+        if (!doneAction && unit.abilityHeat() < 10 &&
+                ((numFactories + numFactoryBlueprints > 0 && numWorkers < 6) ||
+                        distToKarbonite[loc.getY()][loc.getX()] < IsEnoughResourcesNearbySearchDist && isEnoughResourcesNearby(unit))) {
+            // try to replicate
+            if (doReplicate(unit)) {
+                doneAction = true;
+            }
+        }
+        if (!doneAction && gc.karbonite() > 100 &&
+                (numFactories + numFactoryBlueprints < 3 || gc.karbonite() > 150)) {
+            // can blueprint factory/rocket and want to blueprint factory/rocket...
+
+            // TODO: improve decision making on when to build factory, and when to build rocket...
+
+            // then blueprint
+            if (doBlueprint(unit)) {
+                doneAction = true;
+            }
+            // TODO: try to blueprint in a location with space if the adjacent spaces are too cramped
+        }
+
+        if (doBuild(unit)) {
+            // try to build adjacent structures
+            doneAction = true;
+        }
+        if (!doneAction) {
+            // if next to karbonite, mine
+            for (int i = 0; i < 9; i++) {
+                if (gc.canHarvest(unit.id(), directions[i])) {
+                    //System.out.println("harvesting!");
+                    gc.harvest(unit.id(), directions[i]);
+                    doneAction = true;
+                    break;
+                }
+            }
+        }
+        if (!doneAction) {
+            // if next to damaged structure, repair
+            // TODO: implement this
+        }
+
+        return;
+
+        /*
         // try to replicate
         // TODO: limit to 8 workers
         // TODO: only replicate if there is enough money
@@ -848,7 +980,7 @@ public class Player {
         // TODO: ie make it not horrible in special case maps LuL
         if (!doneMovement && unit.location().isOnMap() && numFactories >= 3) {
             MapLocation loc = unit.location().mapLocation();
-            if (distToKarbonite[loc.getY()][loc.getX()] != MultisourceBfsUnreachable) {
+            if (distToKarbonite[loc.getY()][loc.getX()] != MultisourceBfsUnreachableMax) {
                 tryMoveToLoc(unit, distToKarbonite);
                 doneMovement = true;
             }
@@ -878,6 +1010,7 @@ public class Player {
                 }
             }
         }
+        */
     }
 
     public static void runMarsWorker (Unit unit) {
@@ -1626,12 +1759,16 @@ public class Player {
     }
 
     // finds the shortest distance to all squares from an array of starting locations
-    // unreachable squares get distance MultisourceBfsUnreachable
+    // unreachable squares get distance MultisourceBfsUnreachableMax
+    // dangerous squares get MultisourceBfsUnreachableMax + 300 - sq distance to enemy
     // NOTE: DOES NOT allow movement through friendly units
     // NOTE: DOES NOT allow movement through dangerous squares (as defined by isSquareDangerous[][])
     public static void multisourceBfsAvoidingUnitsAndDanger (ArrayList<SimpleState> startingLocs, int resultArr[][]) {
         for (int y = 0; y < height; y++) for (int x = 0; x < width; x++) {
-            resultArr[y][x] = MultisourceBfsUnreachable;
+            resultArr[y][x] = MultisourceBfsUnreachableMax;
+            if (isSquareDangerous[y][x]) {
+                resultArr[y][x] = MultisourceBfsUnreachableMax + 300 - attackDistanceToEnemy[y][x];
+            }
         }
         Queue<SimpleState> queue = new LinkedList<>();
 
@@ -1648,7 +1785,7 @@ public class Player {
                 int ny = cur.y + dy[d];
                 int nx = cur.x + dx[d];
                 if (0 <= ny && ny < height && 0 <= nx && nx < width &&
-                        isPassable[ny][nx] && !isSquareDangerous[ny][nx] && resultArr[ny][nx] == MultisourceBfsUnreachable) {
+                        isPassable[ny][nx] && !isSquareDangerous[ny][nx] && resultArr[ny][nx] == MultisourceBfsUnreachableMax) {
                     resultArr[ny][nx] = resultArr[cur.y][cur.x] + 1;
 
                     // if the next square has a friendly unit, mark down the distance to that square but don't continue the bfs
@@ -1674,5 +1811,176 @@ public class Player {
                 unitType == UnitType.Mage ||
                 unitType == UnitType.Healer ||
                 unitType == UnitType.Worker;
+    }
+
+    public static boolean doReplicate(Unit unit) {
+        // try to replicate next to currently building factory
+        shuffleDirOrder();
+        Direction replicateDir = Direction.Center;
+        for (int i = 0; i < 8; i++) {
+            Direction dir = directions[randDirOrder[i]];
+            if (gc.canReplicate(unit.id(), dir) &&
+                    isNextToBuildingFactory(unit.location().mapLocation().add(dir))) {
+                replicateDir = dir;
+                break;
+            }
+        }
+        // otherwise, replicate wherever
+        if (replicateDir == Direction.Center) {
+            for (int i = 0; i < 8; i++) {
+                Direction dir = directions[randDirOrder[i]];
+                if (gc.canReplicate(unit.id(), dir)) {
+                    replicateDir = dir;
+                    break;
+                }
+            }
+        }
+        if (replicateDir != Direction.Center) {
+            gc.replicate(unit.id(), replicateDir);
+            MapLocation loc = unit.location().mapLocation().add(replicateDir);
+            allMyUnits.add(gc.senseUnitAtLocation(loc));
+            hasFriendlyUnit[loc.getY()][loc.getX()] = true;
+            numWorkers++;
+            return true;
+        }
+        return false;
+    }
+
+    public static boolean doBlueprint(Unit unit) {
+        shuffleDirOrder();
+        int best = -1, bestSpace = -1;
+
+        UnitType toBlueprint = UnitType.Factory;
+        if (gc.researchInfo().getLevel(UnitType.Rocket) >= 1) {
+            // System.out.println("I CAN NOW TRY TO BUILD A ROCKET");
+            toBlueprint = UnitType.Rocket;
+        }
+
+        if (toBlueprint == UnitType.Factory) {
+            // Find blueprint direction such that the factory will have the most free space around it
+            for (int i = 0; i < 8; i++) {
+                if (gc.canBlueprint(unit.id(), toBlueprint, directions[randDirOrder[i]])) {
+                    int space = getSpaceAround(unit.location().mapLocation().add(directions[randDirOrder[i]]));
+                    if (space > bestSpace) {
+                        bestSpace = space;
+                        best = i;
+                    }
+                }
+            }
+        } else {
+            // TODO: decide if we want Rockets to have minimal space like factories (see above)
+            // currently this runs the same code as for Factory
+            for (int i = 0; i < 8; i++) {
+                if (gc.canBlueprint(unit.id(), toBlueprint, directions[randDirOrder[i]])) {
+                    int space = getSpaceAround(unit.location().mapLocation().add(directions[randDirOrder[i]]));
+                    if (space > bestSpace) {
+                        bestSpace = space;
+                        best = i;
+                    }
+                }
+            }
+        }
+
+        if (best != -1) {
+
+            Direction dir = directions[randDirOrder[best]];
+
+            // System.out.println("blueprinting in direction " + dir.toString() + " with space " + bestSpace);
+
+            gc.blueprint(unit.id(), toBlueprint, dir);
+            MapLocation loc = unit.location().mapLocation().add(dir);
+            hasFriendlyUnit[loc.getY()][loc.getX()] = true;
+            Unit other = gc.senseUnitAtLocation(loc);
+
+            if (toBlueprint == UnitType.Factory) {
+                factoriesBeingBuilt.add(other);
+                numFactoryBlueprints++;
+            } else {
+                rocketsBeingBuilt.add(other);
+                numRocketBlueprints++;
+            }
+
+            return true;
+        }
+
+        return false;
+    }
+
+    public static boolean doBuild(Unit unit) {
+        VecUnit units = gc.senseNearbyUnits(unit.location().mapLocation(), 2);
+        for (int i = 0; i < units.size(); i++) {
+            Unit other = units.get(i);
+
+            // only look at factories and rockets
+            if (other.unitType() != UnitType.Factory && other.unitType() != UnitType.Rocket) {
+                continue;
+            }
+
+            if (gc.canBuild(unit.id(), other.id())) {
+                gc.build(unit.id(), other.id());
+
+                // If it's complete, remove it from the factoriesBeingBuilt list
+                // need to re-sense the unit to get the updated structureIsBuilt() value
+                if (gc.senseUnitAtLocation(other.location().mapLocation()).structureIsBuilt() != 0) {
+                    //System.out.println("Finished a factory!");
+                    boolean foundIt = false;
+
+                    if (other.unitType() == UnitType.Factory) {
+                        for (int j = 0; j < factoriesBeingBuilt.size(); j++) {
+                            if (factoriesBeingBuilt.get(j).location().mapLocation().equals(other.location().mapLocation())) {
+                                factoriesBeingBuilt.remove(j);
+                                foundIt = true;
+                                break;
+                            }
+                        }
+                    } else {
+                        for (int j = 0; j < rocketsBeingBuilt.size(); j++) {
+                            if (rocketsBeingBuilt.get(j).location().mapLocation().equals(other.location().mapLocation())) {
+                                rocketsReady.add(other);
+                                rocketsBeingBuilt.remove(j);
+                                foundIt = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (!foundIt) {
+                        System.out.println("ERROR: Structure was expected in ___BeingBuilt, but was missing!");
+                    }
+                }
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public static boolean isEnoughResourcesNearby(Unit unit) {
+        if (!unit.location().isOnMap()) {
+            return false;
+        }
+
+        MapLocation loc = unit.location().mapLocation();
+        int locY = loc.getY(), locX = loc.getX();
+
+        int nearbyKarbonite = 0;
+        // nearby workers includes yourself
+        int nearbyWorkers = 0;
+
+        for (int y = Math.max(locY - IsEnoughResourcesNearbySearchDist, 0); y <= Math.min(locY + IsEnoughResourcesNearbySearchDist, height - 1); y++) {
+            for (int x = Math.max(locX - IsEnoughResourcesNearbySearchDist, 0); x <= Math.min(locX + IsEnoughResourcesNearbySearchDist, width - 1); x++) {
+                if (dis[locY][locX][y][x] <= IsEnoughResourcesNearbySearchDist) {
+                    nearbyKarbonite += lastKnownKarboniteAmount[y][x];
+                }
+                MapLocation otherLoc = new MapLocation(gc.planet(), x, y);
+                if (gc.hasUnitAtLocation(otherLoc)) {
+                    Unit otherUnit = gc.senseUnitAtLocation(otherLoc);
+                    if (otherUnit.team() == gc.team() && otherUnit.unitType() == UnitType.Worker) {
+                        nearbyWorkers++;
+                    }
+                }
+            }
+        }
+
+        //System.out.println("worker at " + loc.toString() + " considering replicating with " + nearbyKarbonite + " karbonite nearby and " + nearbyWorkers + " nearby workers");
+        return nearbyKarbonite > 25 * (nearbyWorkers + 1);
     }
 }
