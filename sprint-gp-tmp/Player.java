@@ -426,7 +426,7 @@ public class Player {
 
                 } else if (unit.unitType() == UnitType.Rocket) {
 
-                    if (unit.structureIsBuilt() == 0) {
+                    if (unit.structureIsBuilt() != 0) {
 
                         if (unit.structureGarrison().size() < unit.structureMaxCapacity()) {
                             rocketsReady.add(unit);
@@ -1083,6 +1083,8 @@ public class Player {
         boolean aboutToFlood = (roundNum >= 749);
         boolean notWorthWaiting = (roundNum >= 649 || gc.orbitPattern().duration(roundNum)+roundNum <= gc.orbitPattern().duration(roundNum+1)+roundNum+1);
         boolean dangerOfDestruction = (unit.health() <= 70);
+
+        // System.out.printf("I am a rocket and I think it isn't worth waiting: %d, full? %d\n", notWorthWaiting ? 1 : 0, fullRocket ? 1 : 0);
 
         if (dangerOfDestruction || aboutToFlood || (fullRocket && notWorthWaiting)) {
             MapLocation where = null;
