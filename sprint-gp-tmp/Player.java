@@ -159,6 +159,8 @@ public class Player {
 
     public static int bfsTowardsBlueprintDist[][] = new int[55][55];
 
+    public static int numEnemiesThatCanAttackSquare[][] = new int[55][55];
+
     public static int numIdleRangers;
 
     public static final int MultisourceBfsUnreachableMax = 499;
@@ -382,6 +384,7 @@ public class Player {
                 isGoodPosition[y][x] = false;
                 isGoodPositionTaken[y][x] = false;
                 isSquareDangerous[y][x] = false;
+                numEnemiesThatCanAttackSquare[y][x] = 0;
 
                 MapLocation loc = new MapLocation(myPlanet, x, y);
                 if (gc.canSenseLocation(loc)) {
@@ -459,6 +462,9 @@ public class Player {
                             if (x < 0 || width <= x) continue;
                             attackDistanceToEnemy[y][x] = Math.min(attackDistanceToEnemy[y][x],
                                     (y - locY) * (y - locY) + (x - locX) * (x - locX));
+                            if (attackDistanceToEnemy[y][x] <= unit.attackRange()) {
+                                numEnemiesThatCanAttackSquare[y][x]++;
+                            }
                         }
                     }
                 }
@@ -518,7 +524,7 @@ public class Player {
     }
 
     public static void finishTurn() {
-        System.out.println("" + numIdleRangers + " idle rangers");
+        //System.out.println("" + numIdleRangers + " idle rangers");
     }
 
     public static void startRacingToMars () {
@@ -1165,9 +1171,32 @@ public class Player {
                     // currently in range of enemy
 
                     if (doneAttack) {
-                        // just completed an attack, move backwards now to kite
-                        // to move backwards, we just don't set doneMove to true
-                        // and then the code will fall back to the "move to good position" code
+                        // just completed an attack, move backwards now to kite if you can
+
+                        int best = -1, bestNumEnemies = 999, bestAttackDist = -1;
+                        for (int i = 0; i < 8; i++) {
+                            Direction dir = directions[i];
+                            MapLocation loc = unit.location().mapLocation().add(dir);
+                            if (0 <= loc.getY() && loc.getY() < height &&
+                                    0 <= loc.getX() && loc.getX() < width) {
+                                int numEnemies = numEnemiesThatCanAttackSquare[loc.getY()][loc.getX()];
+                                int attackDist = attackDistanceToEnemy[loc.getY()][loc.getX()];
+                                if (numEnemies < bestNumEnemies ||
+                                        (numEnemies == bestNumEnemies && attackDist > bestAttackDist)) {
+                                    best = i;
+                                    bestNumEnemies = numEnemies;
+                                    bestAttackDist = attackDist;
+                                }
+                            }
+                        }
+
+                        if (best != -1 && bestNumEnemies < numEnemiesThatCanAttackSquare[myY][myX]) {
+                            System.out.println("kiting backwards!");
+                            doMoveRobot(unit, directions[best]);
+                        }
+
+                        // if you didn't find a good square, don't waste your move cd, just wait for next turn
+                        doneMove = true;
 
                     } else {
                         // wait for your next attack before kiting back, so don't move yet
@@ -1177,6 +1206,7 @@ public class Player {
                     // currently 1 move from being in range of enemy
                     if (!doneAttack && gc.isAttackReady(unit.id()) && gc.round() % 5 == 0) {
                         // move into a position where you can attack
+                        int best = -1, bestNumEnemies = 999;
                         shuffleDirOrder();
                         for (int i = 0; i < 8; i++) {
                             Direction dir = directions[randDirOrder[i]];
@@ -1185,16 +1215,25 @@ public class Player {
                                     0 <= loc.getX() && loc.getX() < width &&
                                     attackDistanceToEnemy[loc.getY()][loc.getX()] <= RangerAttackRange &&
                                     gc.canMove(unit.id(), dir)) {
-                                // mark your current position as yours so other rangers don't try to move there while you're gone
-                                if (isGoodPosition[myY][myX]) {
-                                    isGoodPositionTaken[myY][myX] = true;
-                                } else {
-                                    System.out.println("ERROR: expected current position to be a good position but it wasn't...");
+                                int numEnemies = numEnemiesThatCanAttackSquare[loc.getY()][loc.getX()];
+                                if (numEnemies < bestNumEnemies) {
+                                    best = i;
+                                    bestNumEnemies = numEnemies;
                                 }
-                                doMoveRobot(unit, dir);
-                                doneMove = true;
-                                break;
                             }
+                        }
+
+                        if (best != -1) {
+                            Direction dir = directions[randDirOrder[best]];
+
+                            // mark your current position as yours so other rangers don't try to move there while you're gone
+                            if (isGoodPosition[myY][myX]) {
+                                isGoodPositionTaken[myY][myX] = true;
+                            } else {
+                                System.out.println("ERROR: expected current position to be a good position but it wasn't...");
+                            }
+                            doMoveRobot(unit, dir);
+                            doneMove = true;
                         }
                     }
                 }

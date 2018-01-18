@@ -23,6 +23,7 @@ public class Player {
 
     public static int[][] cacheKarboniteAt = new int[55][55];
     public static int[][] cacheCanSenseLocation = new int[55][55];
+    public static boolean[][] hasFriendlyWorker = new boolean[55][55];
 
     public static int dy[] = {1,1,0,-1,-1,-1,0,1,0};
     public static int dx[] = {0,1,1,1,0,-1,-1,-1,0};
@@ -353,6 +354,7 @@ public class Player {
             for (int j = 0; j < width; j++) {
                 cacheKarboniteAt[i][j] = -1;
                 cacheCanSenseLocation[i][j] = -1;
+                hasFriendlyWorker[i][j] = false;
             }
         }
 
@@ -381,7 +383,7 @@ public class Player {
                 isGoodPositionTaken[y][x] = false;
                 isSquareDangerous[y][x] = false;
 
-                MapLocation loc = new MapLocation(gc.planet(), x, y);
+                MapLocation loc = new MapLocation(myPlanet, x, y);
                 if (gc.canSenseLocation(loc)) {
                     lastKnownKarboniteAmount[y][x] = (int) gc.karboniteAt(loc);
                 }
@@ -411,6 +413,12 @@ public class Player {
                     if (isHealableUnitType(unit.unitType()) && unit.health() < unit.maxHealth()) {
                         MapLocation damagedUnitLoc = unit.location().mapLocation();
                         damagedFriendlyHealableUnits.add(new SimpleState(damagedUnitLoc.getY(), damagedUnitLoc.getX()));
+                    }
+
+
+                    // worker cache position
+                    if (unit.unitType() == UnitType.Worker) {
+                        hasFriendlyWorker[loc.getY()][loc.getX()] = true;
                     }
                 }
 
@@ -1107,13 +1115,16 @@ public class Player {
     public static void runFactory (Unit unit) {
         UnitType unitTypeToBuild = UnitType.Ranger;
 
-        // TODO: change proportion based on current research levels
-        if (numRangers >= 4 * numHealers + 4) {
-            unitTypeToBuild = UnitType.Healer;
-        }
+        MapLocation loc = unit.location().mapLocation();
 
-        if (numWorkers == 0) {
+        // TODO: change proportion based on current research levels
+        if (isSquareDangerous[loc.getY()][loc.getX()]) {
+            // dangerous square. Just build rangers, healers will just get instantly killed.
+            unitTypeToBuild = UnitType.Ranger;
+        } else if (numWorkers == 0) {
             unitTypeToBuild = UnitType.Worker;
+        } else if (numRangers >= 2 * numHealers + 4) {
+            unitTypeToBuild = UnitType.Healer;
         }
 
         boolean canRocket = (gc.researchInfo().getLevel(UnitType.Rocket) >= 1);
@@ -2003,17 +2014,21 @@ public class Player {
                     nearbyKarbonite += lastKnownKarboniteAmount[y][x];
                 }
                 MapLocation otherLoc = new MapLocation(gc.planet(), x, y);
-                if (gc.hasUnitAtLocation(otherLoc)) {
-                    Unit otherUnit = gc.senseUnitAtLocation(otherLoc);
-                    if (otherUnit.team() == gc.team() && otherUnit.unitType() == UnitType.Worker) {
-                        nearbyWorkers++;
-                    }
+                if (hasFriendlyWorker[y][x]) {
+                    nearbyWorkers++;
                 }
             }
         }
 
         //System.out.println("worker at " + loc.toString() + " considering replicating with " + nearbyKarbonite + " karbonite nearby and " + nearbyWorkers + " nearby workers");
-        return nearbyKarbonite > 25 * (nearbyWorkers + 1);
+        boolean worthReplicating = nearbyKarbonite > 25 * (nearbyWorkers + 1);
+
+        // if still setting up, we can afford more leniency
+        if (numFactories + numFactoryBlueprints < 3 && nearbyKarbonite > 19 * (nearbyWorkers + 1) && nearbyWorkers < 7) {
+            worthReplicating = true;
+        }
+
+        return worthReplicating;
     }
 
     public static boolean bfsTowardsBlueprint(Unit unit) {
@@ -2060,10 +2075,10 @@ public class Player {
                             queue.add(new BfsState(ny, nx, cur.startingDir));
                         } else {
                             // check if the square is a blueprint
-                            MapLocation nextLoc = new MapLocation(gc.planet(), nx, ny);
+                            MapLocation nextLoc = new MapLocation(myPlanet, nx, ny);
                             if (gc.hasUnitAtLocation(nextLoc)) {
                                 Unit other = gc.senseUnitAtLocation(nextLoc);
-                                if (other.team() == gc.team() &&
+                                if (other.team() == myTeam &&
                                         (other.unitType() == UnitType.Factory || other.unitType() == UnitType.Rocket)
                                         && other.structureIsBuilt() == 0) {
                                     dirToMove = directions[cur.startingDir];
