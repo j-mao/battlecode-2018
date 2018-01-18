@@ -304,7 +304,7 @@ public class Player {
 
     public static int getDirIndex(Direction dir) {
         // TODO: make this faster?
-        for (int i = 0; i < 8; i++) {
+        for (int i = 0; i < 9; i++) {
             if (directions[i] == dir) {
                 return i;
             }
