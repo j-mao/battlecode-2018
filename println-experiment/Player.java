@@ -1106,14 +1106,15 @@ public class Player {
 
         if ((dangerOfDestruction && unit.structureGarrison().size()>0)  || aboutToFlood || (fullRocket && notWorthWaiting)) {
             MapLocation where = null;
-            
-            AsteroidPattern asteroidPattern = new AsteroidPattern();
-            ArrayList<MapLocation> struckBeforeOffloaded = new ArrayList<MapLocation>();
+            boolean willBeHit = true;            
+
+            AsteroidPattern asteroidPattern = gc.asteroidPattern();
+            ArrayList<MapLocation> strikesBeforeOffloaded = new ArrayList<MapLocation>();
             long arrivalRound = gc.orbitPattern().duration(roundNum)+roundNum;
             
             for (long roundNum = arrivalRound; roundNum<=arrivalRound+unit.structureGarrison().size(); roundNum++){
-                if (asteroidPattern.hasAsteroid(roundNum){
-                    struckBeforeOffloadded.add(asteroidPattern.asteroid(roundNum).getLocation());
+                if (asteroidPattern.hasAsteroid(roundNum)){
+                    strikesBeforeOffloaded.add(asteroidPattern.asteroid(roundNum).getLocation());
                 }
             }
             
@@ -1121,7 +1122,15 @@ public class Player {
                 int landX = (int)(Math.abs(rand.nextInt())%MarsMap.getWidth());
                 int landY = (int)(Math.abs(rand.nextInt())%MarsMap.getHeight());
                 where = new MapLocation(Planet.Mars, landX, landY);
-            } while (MarsMap.isPassableTerrainAt(where) == 0);
+                
+                willBeHit = false;
+                for (MapLocation strikeLocation: strikesBeforeOffloaded) {
+                    if (strikeLocation.getX()==landX && strikeLocation.getY()==landY){
+                        willBeHit = true;
+                        break;
+                    }  
+                }
+            } while (MarsMap.isPassableTerrainAt(where) == 0 || willBeHit);
 
             gc.launchRocket(unit.id(), where);
         }
