@@ -254,7 +254,7 @@ public class Player {
             gc.queueResearch(UnitType.Rocket);
 
             while (true) {
-                System.out.println("Current round: " + roundNum);
+                // System.out.println("Current round: " + roundNum);
 
                 VecUnit units = gc.myUnits();
                 initTurn(units);
@@ -1191,7 +1191,7 @@ public class Player {
                         }
 
                         if (best != -1 && bestNumEnemies < numEnemiesThatCanAttackSquare[myY][myX]) {
-                            System.out.println("kiting backwards!");
+                            // System.out.println("kiting backwards!");
                             doMoveRobot(unit, directions[best]);
                         }
 
@@ -1948,7 +1948,7 @@ public class Player {
                 }
             }
 
-            System.out.println("worker at " + unit.location().mapLocation() + " before decision " + wouldBeBest + " after decision + " + best);
+            // System.out.println("worker at " + unit.location().mapLocation() + " before decision " + wouldBeBest + " after decision + " + best);
         } else {
             // TODO: decide if we want Rockets to have minimal space like factories (see above)
             // currently this runs the same code as for Factory
