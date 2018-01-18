@@ -767,8 +767,10 @@ public class Player {
             }
         }
         if (!doneAction) {
-            // if next to damaged structure, repair
-            // TODO: implement this
+           // try to repair
+           if (doRepair(unit)){
+               doneAction = true;
+           }
         }
 
         return;
@@ -2031,6 +2033,35 @@ public class Player {
                 }
                 return true;
             }
+        }
+        return false;
+    }
+
+    public static boolean doRepair(Unit unit) {
+        VecUnit units = gc.senseNearbyUnits(unit.location().mapLocation(), 2);
+        int bestId = -1;
+        long maxHealthGap = -1;
+        //greatest gap from max not lowest health as we don't want to be stuck healing a rocket on 200 HP with a factory on 230
+        //possible optimization: prioritisation based of type / % health
+        for (int i = 0; i < units.size(); i++) {
+            Unit other = units.get(i);
+
+            // only look at factories and rockets
+            if (other.unitType() != UnitType.Factory && other.unitType() != UnitType.Rocket) {
+                continue;
+            }
+
+            if (gc.canRepair(unit.id(), other.id())) {
+                long healthGap = other.maxHealth()-other.health();
+                if (healthGap>0 && (bestId==-1 || healthGap>maxHealthGap)){
+                    bestId = other.id();
+                    maxHealthGap = healthGap;
+                }
+            }
+        }
+        if (bestId!=-1){
+            gc.repair(unit.id(),bestId);
+            return true;
         }
         return false;
     }
