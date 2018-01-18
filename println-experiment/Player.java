@@ -1104,8 +1104,19 @@ public class Player {
 
         // System.out.printf("I am a rocket and I think it isn't worth waiting: %d, full? %d\n", notWorthWaiting ? 1 : 0, fullRocket ? 1 : 0);
 
-        if (dangerOfDestruction || aboutToFlood || (fullRocket && notWorthWaiting)) {
+        if ((dangerOfDestruction && unit.structureGarrison().size()>0)  || aboutToFlood || (fullRocket && notWorthWaiting)) {
             MapLocation where = null;
+            
+            AsteroidPattern asteroidPattern = new AsteroidPattern();
+            ArrayList<MapLocation> struckBeforeOffloaded = new ArrayList<MapLocation>();
+            long arrivalRound = gc.orbitPattern().duration(roundNum)+roundNum;
+            
+            for (long roundNum = arrivalRound; roundNum<=arrivalRound+unit.structureGarrison().size(); roundNum++){
+                if (asteroidPattern.hasAsteroid(roundNum){
+                    struckBeforeOffloadded.add(asteroidPattern.asteroid(roundNum).getLocation());
+                }
+            }
+            
             do {
                 int landX = (int)(Math.abs(rand.nextInt())%MarsMap.getWidth());
                 int landY = (int)(Math.abs(rand.nextInt())%MarsMap.getHeight());
