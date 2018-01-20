@@ -6,6 +6,7 @@
 #include <random>
 #include <functional>
 
+#include <utility>
 #include <map>
 #include <vector>
 #include <queue>
@@ -108,15 +109,18 @@ static int attackDistanceToEnemy[55][55];
 // e.g. distance [51, 72] from the closest enemy (this might be changed later...)
 // Warning: random constants being used. Need to be changed if constants change!
 // if units take up "good positions" then in theory they should form a nice concave. "In theory" LUL
-static bool isGoodPosition[55][55];
+static bool is_good_ranger_position[55][55];
 // whether a unit has already taken a potential good position
-static bool isGoodPositionTaken[55][55];
-static int numGoodPositions;
-static int goodPositionsXList[55 * 55];
-static int goodPositionsYList[55 * 55];
+static bool is_good_ranger_position_taken[55][55];
+static vector<pair<int, int>> good_ranger_positions;
 
 static int lastKnownKarboniteAmount[55][55];
 static int distToKarbonite[55][55];
+
+static int time_since_damaged_unit[55][55];
+static bool is_good_healer_position[55][55];
+static bool is_good_healer_position_taken[55][55];
+static vector<pair<int, int>> good_healer_positions;
 
 static int distToDamagedFriendlyHealableUnit[55][55];
 
@@ -204,7 +208,7 @@ static bool doRepair(Unit& unit);
 static bool isEnoughResourcesNearby(Unit& unit);
 static bool tryMoveToLoc (Unit& unit, int distArray[55][55]);
 static void tryToLoadRocket (Unit& unit);
-static MapLocation getClosestFreeGoodPosition(int y, int x);
+static pair<int,int> get_closest_good_position (int y, int x, bool taken_array[55][55], vector<pair<int, int>>& good_list);
 static int get_dir_index (Direction dir);
 
 class compareUnits {
@@ -258,7 +262,11 @@ int main() {
 				Unit unit = allMyUnits.top();
 				allMyUnits.pop();
 
-				if (!unit.get_location().is_on_map()) {
+				if (!gc.can_sense_unit(unit.get_id())) {
+					continue;
+				}
+
+				if (!unit.is_on_map()) {
 					continue;
 				}
 
@@ -314,7 +322,11 @@ int main() {
 				Unit unit = allMyUnits.top();
 				allMyUnits.pop();
 
-				if (!unit.get_location().is_on_map()) {
+				if (!gc.can_sense_unit(unit.get_id())) {
+					continue;
+				}
+
+				if (!unit.is_on_map()) {
 					continue;
 				}
 
@@ -379,10 +391,14 @@ static void init_turn (vector<Unit>& myUnits) {
 		for (int x = 0; x < width; x++) {
 			hasFriendlyUnit[y][x] = false;
 			attackDistanceToEnemy[y][x] = 9999;
-			isGoodPosition[y][x] = false;
-			isGoodPositionTaken[y][x] = false;
+			is_good_ranger_position[y][x] = false;
+			is_good_ranger_position_taken[y][x] = false;
 			isSquareDangerous[y][x] = false;
 			numEnemiesThatCanAttackSquare[y][x] = 0;
+
+			time_since_damaged_unit[y][x]++;
+			is_good_healer_position[y][x] = false;
+			is_good_healer_position_taken[y][x] = false;
 
 			MapLocation loc(myPlanet, x, y);
 			if (gc.can_sense_location(loc)) {
@@ -414,8 +430,13 @@ static void init_turn (vector<Unit>& myUnits) {
 				hasFriendlyUnit[loc.get_y()][loc.get_x()] = true;
 
 				if (is_healable_unit_type(unit.get_unit_type()) && unit.get_health() < unit.get_max_health()) {
-					MapLocation damagedUnitLoc = unit.get_map_location();
-					damagedFriendlyHealableUnits.push_back(SimpleState(damagedUnitLoc.get_y(), damagedUnitLoc.get_x()));
+					//printf("damaged dude at %d %d\n", loc.get_y(), loc.get_x());
+
+					int locY = loc.get_y(), locX = loc.get_x();
+
+					time_since_damaged_unit[locY][locX] = 0;
+
+					damagedFriendlyHealableUnits.push_back(SimpleState(locY, locX));
 				}
 
 				// worker cache position
@@ -470,15 +491,39 @@ static void init_turn (vector<Unit>& myUnits) {
 		}
 	}
 
+	fo(ty, 0, height) fo(tx, 0, width) {
+		if (time_since_damaged_unit[ty][tx] <= 5) {
+			for (int y = ty - 6; y <= ty + 6; y++) {
+				if (y < 0 || height <= y) continue;
+				for (int x = tx - 6; x <= tx + 6; x++) {
+					if (x < 0 || width <= x) continue;
+					int myDist = (y-ty) * (y-ty) + (x-tx) * (x-tx);
+					if (10 <= myDist && myDist <= 20) {
+						is_good_healer_position[y][x] = true;
+					}
+				}
+			}
+		}
+	}
+
+	good_healer_positions.clear();
+	fo(y, 0, height) fo(x, 0, width) {
+		if (attackDistanceToEnemy[y][x] <= 75) {
+			is_good_healer_position[y][x] = false;
+		}
+		if (is_good_healer_position[y][x]) {
+			good_healer_positions.push_back(make_pair(y, x));
+		}
+	}
+	printf("%d good healer positions\n", SZ(good_healer_positions));
+
 	// calculate good positions
-	numGoodPositions = 0;
+	good_ranger_positions.clear();
 	for (int y = 0; y < height; y++) for (int x = 0; x < width; x++) {
 		if (RangerAttackRange < attackDistanceToEnemy[y][x] && attackDistanceToEnemy[y][x] <= OneMoveFromRangerAttackRange) {
-			isGoodPosition[y][x] = true;
-			goodPositionsYList[numGoodPositions] = y;
-			goodPositionsXList[numGoodPositions] = x;
+			is_good_ranger_position[y][x] = true;
+			good_ranger_positions.push_back(make_pair(y, x));
 			//System.out.println("good position at " + y + " " + x);
-			numGoodPositions++;
 		}
 
 		// also calculate dangerous squares
@@ -820,8 +865,8 @@ static void runEarthWorker (Unit& unit) {
 	}
 	if (!doneAction) {
 		if (doRepair(unit)){
-               doneAction = true;
-        }
+			doneAction = true;
+		}
 	}
 
 	return;
@@ -829,22 +874,46 @@ static void runEarthWorker (Unit& unit) {
 
 static void runMarsWorker (Unit& unit) {
 
-	bool doneAction = false;
+	bool doneMovement = !gc.is_move_ready(unit.get_id());
 
-	if (roundNum % 150 == 0 || roundNum >= 750) {
+	if (!doneMovement) {
+		// move towards karbonite
+		MapLocation loc = unit.get_map_location();
+		if (distToKarbonite[loc.get_y()][loc.get_x()] != MultisourceBfsUnreachableMax) {
+			tryMoveToLoc(unit, distToKarbonite);
+			doneMovement = true;
+		}
+	}
+
+	if (!doneMovement) {
+		// otherwise move randomly to a not-dangerous square
+		shuffleDirOrder();
 		for (int i = 0; i < 8; i++) {
 			Direction dir = directions[randDirOrder[i]];
-			if (gc.can_replicate(unit.get_id(), dir)) {
-				gc.replicate(unit.get_id(), dir);
-				// TODO: add created units to units list so they can do something immediately on the turn they're created
-				MapLocation loc = unit.get_map_location().add(dir);
-				allMyUnits.push(gc.sense_unit_at_location(loc));
-				hasFriendlyUnit[loc.get_y()][loc.get_x()] = true;
-				// TODO: test on a rectangular map to make sure I didn't mess up any y, x orders anywhere
-				numWorkers++;
-				doneAction = true;
+			MapLocation loc = unit.get_map_location().add(dir);
+			if (0 <= loc.get_y() && loc.get_y() < height &&
+					0 <= loc.get_x() && loc.get_x() < width &&
+					!isSquareDangerous[loc.get_y()][loc.get_x()] &&
+					gc.can_move(unit.get_id(), dir)) {
+				doMoveRobot(unit, dir);
 				break;
 			}
+		}
+	}
+
+	// update worker location after moving
+	unit = gc.get_unit(unit.get_id());
+	MapLocation loc = unit.get_map_location();
+
+	bool doneAction = false;
+
+	// late game or can afford rocket + units + replicate
+	bool shouldReplicate = (roundNum >= 751 || gc.get_karbonite() > 75 + 20*2 + 30);
+	shouldReplicate |= isEnoughResourcesNearby(unit);
+
+	if (!doneAction && unit.get_ability_heat() < 10 && shouldReplicate) {
+		if (doReplicate(unit)) {
+			doneAction = true;
 		}
 	}
 
@@ -856,15 +925,6 @@ static void runMarsWorker (Unit& unit) {
 				gc.harvest(unit.get_id(), directions[i]);
 			}
 		}
-	}
-
-	// try move randomly
-	// TODO: MOVE SMARTLY TOWARDS FOOD
-	Direction dir = directions[rand()%8];
-
-	// Most methods on gc take unit IDs, instead of the unit objects themselves.
-	if (gc.is_move_ready(unit.get_id()) && gc.can_move(unit.get_id(), dir)) {
-		doMoveRobot(unit, dir);
 	}
 }
 
@@ -1022,8 +1082,8 @@ static void runRanger (Unit& unit) {
 						Direction dir = directions[randDirOrder[best]];
 
 						// mark your current position as yours so other rangers don't try to move there while you're gone
-						if (isGoodPosition[myY][myX]) {
-							isGoodPositionTaken[myY][myX] = true;
+						if (is_good_ranger_position[myY][myX]) {
+							is_good_ranger_position_taken[myY][myX] = true;
 						} else {
 							printf("ERROR: expected current position to be a good position but it wasn't...");
 						}
@@ -1051,7 +1111,7 @@ static void runRanger (Unit& unit) {
 			}
 
 			// check if current location is good position
-			if (!doneMove && isGoodPosition[myY][myX]) {
+			if (!doneMove && is_good_ranger_position[myY][myX]) {
 				doneMove = true;
 
 				// if there's an closer (or equally close) adjacent good position
@@ -1064,13 +1124,13 @@ static void runRanger (Unit& unit) {
 						MapLocation loc = unit.get_map_location().add(dir);
 						if (0 <= loc.get_y() && loc.get_y() < height &&
 								0 <= loc.get_x() && loc.get_x() < width &&
-								isGoodPosition[loc.get_y()][loc.get_x()] &&
+								is_good_ranger_position[loc.get_y()][loc.get_x()] &&
 								manhattanDistanceToNearestEnemy[loc.get_y()][loc.get_x()] <= manhattanDistanceToNearestEnemy[myY][myX] &&
 								gc.can_move(unit.get_id(), dir)) {
 							//System.out.println("moving to other good location!!");
 							foundMove = true;
 							doMoveRobot(unit, dir);
-							isGoodPositionTaken[loc.get_y()][loc.get_x()] = true;
+							is_good_ranger_position_taken[loc.get_y()][loc.get_x()] = true;
 							break;
 						}
 					}
@@ -1078,20 +1138,20 @@ static void runRanger (Unit& unit) {
 
 				if (!foundMove) {
 					// otherwise, stay on your current position
-					if (!isGoodPositionTaken[myY][myX]) {
-						isGoodPositionTaken[myY][myX] = true;
+					if (!is_good_ranger_position_taken[myY][myX]) {
+						is_good_ranger_position_taken[myY][myX] = true;
 					}
 				}
 			}
 
 			// otherwise, try to move to good position
-			MapLocation closestFreeGoodPosition = getClosestFreeGoodPosition(myY, myX);
-			if (!doneMove && closestFreeGoodPosition != nullMapLocation) {
-				int y = closestFreeGoodPosition.get_y();
-				int x = closestFreeGoodPosition.get_x();
-				isGoodPositionTaken[y][x] = true;
+			pair<int,int> best_good = get_closest_good_position(myY, myX, is_good_ranger_position_taken, good_ranger_positions);
+			if (!doneMove && best_good.first != -1) {
+				int y = best_good.first;
+				int x = best_good.second;
+				is_good_ranger_position_taken[y][x] = true;
 				//System.out.println("I'm at " + unit.get_map_location().toString() + " and I'm moving to good location " + closestFreeGoodPosition.toString());
-				tryMoveToLoc(unit, dis[closestFreeGoodPosition.get_y()][closestFreeGoodPosition.get_x()]);
+				tryMoveToLoc(unit, dis[y][x]);
 				doneMove = true;
 			}
 
@@ -1170,42 +1230,40 @@ static void runKnight(Unit& unit) {
 }
 
 static void runHealer (Unit& unit) {
-	bool healDone = tryToHeal(unit);
-	bool moveDone = false;
+	bool doneHeal = tryToHeal(unit);
+	bool doneMove = false;
 
-	// move to damaged friendly healable unit
-	if (!healDone) {
-		moveDone = tryMoveToLoc(unit, distToDamagedFriendlyHealableUnit);
-	} else {
-		// if you're too close, try to move back
-		if (unit.is_on_map() && gc.is_move_ready(unit.get_id())) {
-			MapLocation loc = unit.get_map_location();
-			if (attackDistanceToEnemy[loc.get_y()][loc.get_x()] <= 100) {
-				int best = -1, bestDist = -1;
-				for (int i = 0; i < 8; i++) {
-					if (gc.can_move(unit.get_id(), directions[i])) {
-						MapLocation other = loc.add(directions[i]);
-						int attackDist = attackDistanceToEnemy[other.get_y()][other.get_x()];
-						if (best == -1 || attackDist > bestDist) {
-							bestDist = attackDist;
-							best = i;
-						}
-					}
-				}
-				if (best != -1) {
-					//System.out.println("healer moving back!");
-					moveDone = true;
-					doMoveRobot(unit, directions[best]);
-				}
-			}
+	if (raceToMars && !doneMove) {
+		doneMove = tryToMoveToRocket(unit);
+	}
+
+	MapLocation loc = unit.get_map_location();
+	int myY = loc.get_y(), myX = loc.get_x();
+
+	if (!doneMove && is_good_healer_position[myY][myX]) {
+		doneMove = true;
+		is_good_healer_position_taken[myY][myX] = true;
+	}
+
+	if (!doneMove) {
+		pair<int,int> best_good = get_closest_good_position(myY, myX, is_good_healer_position_taken, good_healer_positions);
+		if (best_good.first != -1) {
+			int y = best_good.first;
+			int x = best_good.second;
+			is_good_healer_position_taken[y][x] = true;
+			//System.out.println("I'm at " + unit.get_map_location().toString() + " and I'm moving to good location " + closestFreeGoodPosition.toString());
+			tryMoveToLoc(unit, dis[y][x]);
+			doneMove = true;
 		}
 	}
 
-	if (raceToMars && !moveDone) {
-		moveDone = tryToMoveToRocket(unit);
+	if (!doneMove) {
+		if (tryMoveToLoc(unit, distToDamagedFriendlyHealableUnit)) {
+			doneMove = true;
+		}
 	}
 
-	if (!healDone) {
+	if (!doneHeal) {
 		tryToHeal(unit);
 	}
 }
@@ -1567,9 +1625,9 @@ static void multisourceBfsAvoidingUnitsAndDanger (vector<SimpleState>& startingL
 
 				// if the next square has a friendly unit, mark down the distance to that square but don't continue the bfs
 				// through that square
-				if (!hasFriendlyUnit[ny][nx]) {
-					q.push(SimpleState(ny, nx));
-				}
+				//if (!hasFriendlyUnit[ny][nx])
+
+				q.push(SimpleState(ny, nx));
 			}
 		}
 	}
@@ -1733,33 +1791,33 @@ static bool doBuild(Unit& unit) {
 }
 
 static bool doRepair(Unit& unit) {
-        vector<Unit> units = gc.sense_nearby_units(unit.get_location().get_map_location(), 2);
-        int bestId = -1;
-        int maxHealthGap = -1;
-        //greatest gap from max not lowest health as we don't want to be stuck healing a rocket on 200 HP with a factory on 230
-        //possible optimization: prioritisation based of type / % health
-        for (int i = 0; i < units.size(); i++) {
-            Unit other = units[i];
+	vector<Unit> units = gc.sense_nearby_units(unit.get_location().get_map_location(), 2);
+	int bestId = -1;
+	int maxHealthGap = -1;
+	//greatest gap from max not lowest health as we don't want to be stuck healing a rocket on 200 HP with a factory on 230
+	//possible optimization: prioritisation based of type / % health
+	for (int i = 0; i < units.size(); i++) {
+		Unit other = units[i];
 
-            // only look at factories and rockets
-            if (other.get_unit_type() != Factory && other.get_unit_type() != Rocket) {
-                continue;
-            }
+		// only look at factories and rockets
+		if (other.get_unit_type() != Factory && other.get_unit_type() != Rocket) {
+			continue;
+		}
 
-            if (gc.can_repair(unit.get_id(), other.get_id())) {
-                int healthGap = other.get_max_health()-other.get_health();
-                if (healthGap>0 && (bestId==-1 || healthGap>maxHealthGap)){
-                    bestId = other.get_id();
-                    maxHealthGap = healthGap;
-                }
-            }
-        }
-        if (bestId!=-1){
-            gc.repair(unit.get_id(),bestId);
-            return true;
-        }
-        return false;
-    }
+		if (gc.can_repair(unit.get_id(), other.get_id())) {
+			int healthGap = other.get_max_health()-other.get_health();
+			if (healthGap>0 && (bestId==-1 || healthGap>maxHealthGap)){
+				bestId = other.get_id();
+				maxHealthGap = healthGap;
+			}
+		}
+	}
+	if (bestId!=-1){
+		gc.repair(unit.get_id(),bestId);
+		return true;
+	}
+	return false;
+}
 
 static bool isEnoughResourcesNearby(Unit& unit) {
 	if (!unit.is_on_map()) {
@@ -1784,18 +1842,29 @@ static bool isEnoughResourcesNearby(Unit& unit) {
 		}
 	}
 
-	//System.out.println("worker at " + loc.toString() + " considering replicating with " + nearbyKarbonite + " karbonite nearby and " + nearbyWorkers + " nearby workers");
-	bool worthReplicating = nearbyKarbonite > 25 * (nearbyWorkers + 1);
+	bool worthReplicating = false;
+	if (myPlanet == Earth) {
+		//System.out.println("worker at " + loc.toString() + " considering replicating with " + nearbyKarbonite + " karbonite nearby and " + nearbyWorkers + " nearby workers");
+		worthReplicating = nearbyKarbonite > 25 * (nearbyWorkers + 1);
 
-	// if still setting up, we can afford more leniency
-	if (numFactories + numFactoryBlueprints < 3 && nearbyKarbonite > 19 * (nearbyWorkers + 1) && nearbyWorkers < 7) {
-		worthReplicating = true;
+		// if still setting up, we can afford more leniency
+		if (numFactories + numFactoryBlueprints < 3 && nearbyKarbonite > 19 * (nearbyWorkers + 1) && nearbyWorkers < 7) {
+			worthReplicating = true;
+		}
+
+	} else {
+		worthReplicating = nearbyKarbonite > 31 * (nearbyWorkers + 1);
 	}
 
 	return worthReplicating;
 }
 
 static bool bfsTowardsBlueprint(Unit& unit) {
+
+	if (SZ(rocketsBeingBuilt) + SZ(factoriesBeingBuilt) == 0) {
+		return false;
+	}
+
 	int dist = 4;
 
 	MapLocation loc = unit.get_map_location();
@@ -1871,13 +1940,13 @@ static bool bfsTowardsBlueprint(Unit& unit) {
 	return false;
 }
 
-static MapLocation getClosestFreeGoodPosition (int y, int x) {
+static pair<int,int> get_closest_good_position (int y, int x, bool taken_array[55][55], vector<pair<int, int>>& good_list) {
 	int bestDis = 999;
 	int candidates = 0;
-	for (int i = 0; i < numGoodPositions; i++) {
-		int curY = goodPositionsYList[i];
-		int curX = goodPositionsXList[i];
-		if (!isGoodPositionTaken[curY][curX] && !hasFriendlyUnit[curY][curX]) {
+	fo(i, 0, SZ(good_list)) {
+		int curY = good_list[i].first;
+		int curX = good_list[i].second;
+		if (!taken_array[curY][curX] && !hasFriendlyUnit[curY][curX]) {
 			if (candidates == 0 || dis[y][x][curY][curX] < bestDis) {
 				getClosestFreeGoodPositionCandidates[0] = i;
 				candidates = 1;
@@ -1890,9 +1959,9 @@ static MapLocation getClosestFreeGoodPosition (int y, int x) {
 	}
 
 	if (candidates == 0) {
-		return nullMapLocation;
+		return make_pair(-1, -1);
 	} else {
 		int best = getClosestFreeGoodPositionCandidates[rand() % candidates];
-		return MapLocation(myPlanet, goodPositionsXList[best], goodPositionsYList[best]);
+		return good_list[best];
 	}
 }
