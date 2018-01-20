@@ -200,6 +200,7 @@ static void checkForEnemyUnits (vector<Unit>& allUnits);
 static bool bfsTowardsBlueprint(Unit& unit);
 static bool doBuild(Unit& unit);
 static bool doBlueprint(Unit& unit, UnitType toBlueprint);
+static bool doRepair(Unit& unit);
 static bool isEnoughResourcesNearby(Unit& unit);
 static bool tryMoveToLoc (Unit& unit, int distArray[55][55]);
 static void tryToLoadRocket (Unit& unit);
@@ -820,8 +821,9 @@ static void runEarthWorker (Unit& unit) {
 		}
 	}
 	if (!doneAction) {
-		// if next to damaged structure, repair
-		// TODO: implement this
+		if (doRepair(unit)){
+               doneAction = true;
+        }
 	}
 
 	return;
@@ -1731,6 +1733,35 @@ static bool doBuild(Unit& unit) {
 	}
 	return false;
 }
+
+static bool doRepair(Unit& unit) {
+        vector<Unit> units = gc.sense_nearby_units(unit.get_location().get_map_location(), 2);
+        int bestId = -1;
+        int maxHealthGap = -1;
+        //greatest gap from max not lowest health as we don't want to be stuck healing a rocket on 200 HP with a factory on 230
+        //possible optimization: prioritisation based of type / % health
+        for (int i = 0; i < units.size(); i++) {
+            Unit other = units[i];
+
+            // only look at factories and rockets
+            if (other.get_unit_type() != Factory && other.get_unit_type() != Rocket) {
+                continue;
+            }
+
+            if (gc.can_repair(unit.get_id(), other.get_id())) {
+                int healthGap = other.get_max_health()-other.get_health();
+                if (healthGap>0 && (bestId==-1 || healthGap>maxHealthGap)){
+                    bestId = other.get_id();
+                    maxHealthGap = healthGap;
+                }
+            }
+        }
+        if (bestId!=-1){
+            gc.repair(unit.get_id(),bestId);
+            return true;
+        }
+        return false;
+    }
 
 static bool isEnoughResourcesNearby(Unit& unit) {
 	if (!unit.is_on_map()) {
