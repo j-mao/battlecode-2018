@@ -999,7 +999,7 @@ static void runRanger (Unit& unit) {
 				}
 			} else {
 				// currently 1 move from being in range of enemy
-				if (!doneAttack && gc.is_attack_ready(unit.get_id()) && roundNum == 0) {
+				if (!doneAttack && gc.is_attack_ready(unit.get_id()) && roundNum % 5== 0) {
 					// move into a position where you can attack
 					int best = -1, bestNumEnemies = 999;
 					shuffleDirOrder();
