@@ -909,6 +909,7 @@ static void runMarsWorker (Unit& unit) {
 
 	// late game or can afford rocket + units + replicate
 	bool shouldReplicate = (roundNum >= 751 || gc.get_karbonite() > 75 + 20*2 + 30);
+	shouldReplicate |= isEnoughResourcesNearby(unit);
 
 	if (!doneAction && unit.get_ability_heat() < 10 && shouldReplicate) {
 		if (doReplicate(unit)) {
@@ -1841,12 +1842,18 @@ static bool isEnoughResourcesNearby(Unit& unit) {
 		}
 	}
 
-	//System.out.println("worker at " + loc.toString() + " considering replicating with " + nearbyKarbonite + " karbonite nearby and " + nearbyWorkers + " nearby workers");
-	bool worthReplicating = nearbyKarbonite > 25 * (nearbyWorkers + 1);
+	bool worthReplicating = false;
+	if (myPlanet == Earth) {
+		//System.out.println("worker at " + loc.toString() + " considering replicating with " + nearbyKarbonite + " karbonite nearby and " + nearbyWorkers + " nearby workers");
+		worthReplicating = nearbyKarbonite > 25 * (nearbyWorkers + 1);
 
-	// if still setting up, we can afford more leniency
-	if (numFactories + numFactoryBlueprints < 3 && nearbyKarbonite > 19 * (nearbyWorkers + 1) && nearbyWorkers < 7) {
-		worthReplicating = true;
+		// if still setting up, we can afford more leniency
+		if (numFactories + numFactoryBlueprints < 3 && nearbyKarbonite > 19 * (nearbyWorkers + 1) && nearbyWorkers < 7) {
+			worthReplicating = true;
+		}
+
+	} else {
+		worthReplicating = nearbyKarbonite > 31 * (nearbyWorkers + 1);
 	}
 
 	return worthReplicating;
