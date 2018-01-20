@@ -69,9 +69,10 @@ static vector<MapLocation> attackLocs;
 static int width, height;
 static bool isPassable[55][55];
 static bool hasFriendlyUnit[55][55];
+static bool hasFriendlyStructure[55][55];
 
 // temporary seen array
-static bool bfsSeen[55][55];
+static bool bfs_seen[55][55];
 
 // which direction you should move to reach each square, according to the bfs
 static int bfsDirectionIndexTo[55][55];
@@ -210,6 +211,7 @@ static bool tryMoveToLoc (Unit& unit, int distArray[55][55]);
 static void tryToLoadRocket (Unit& unit);
 static pair<int,int> get_closest_good_position (int y, int x, bool taken_array[55][55], vector<pair<int, int>>& good_list);
 static int get_dir_index (Direction dir);
+static bool will_blueprint_create_blockage(MapLocation loc);
 
 class compareUnits {
 	public:
@@ -390,6 +392,7 @@ static void init_turn (vector<Unit>& myUnits) {
 	for (int y = 0; y < height; y++) {
 		for (int x = 0; x < width; x++) {
 			hasFriendlyUnit[y][x] = false;
+			hasFriendlyStructure[y][x] = false;
 			attackDistanceToEnemy[y][x] = 9999;
 			is_good_ranger_position[y][x] = false;
 			is_good_ranger_position_taken[y][x] = false;
@@ -428,6 +431,10 @@ static void init_turn (vector<Unit>& myUnits) {
 			if (unit.get_location().is_on_map()) {
 				MapLocation loc = unit.get_map_location();
 				hasFriendlyUnit[loc.get_y()][loc.get_x()] = true;
+
+				if (is_structure(unit.get_unit_type())) {
+					hasFriendlyStructure[loc.get_y()][loc.get_x()] = true;
+				}
 
 				if (is_healable_unit_type(unit.get_unit_type()) && unit.get_health() < unit.get_max_health()) {
 					//printf("damaged dude at %d %d\n", loc.get_y(), loc.get_x());
@@ -1671,17 +1678,6 @@ static bool doBlueprint (Unit& unit, UnitType toBlueprint) {
 	int best = -1, bestAttackDistance = -1, bestSpace = -1;
 
 	if (toBlueprint == Factory) {
-		// Find blueprint direction such that the factory will have the most free space around it
-		for (int i = 0; i < 8; i++) {
-			if (gc.can_blueprint(unit.get_id(), toBlueprint, directions[randDirOrder[i]])) {
-				int space = getSpaceAround(unit.get_map_location().add(directions[randDirOrder[i]]));
-				if (space > bestSpace) {
-					bestSpace = space;
-					best = i;
-				}
-			}
-		}
-
 		int wouldBeBest = best;
 
 		// Find blueprint direction such that the factory will have the most free space around it
@@ -1690,12 +1686,14 @@ static bool doBlueprint (Unit& unit, UnitType toBlueprint) {
 			MapLocation loc = unit.get_map_location().add(directions[randDirOrder[i]]);
 			if (0 <= loc.get_y() && loc.get_y() < height &&
 					0 <= loc.get_x() && loc.get_x() < width) {
-				int attackDistance = attackDistanceToEnemy[loc.get_y()][loc.get_x()];
+				// don't worry about attack distance more than 99
+				int attackDistance = min(99, attackDistanceToEnemy[loc.get_y()][loc.get_x()]);
 				// we want at least 5 squares around the factory
 				int space = min(getSpaceAround(loc), 5);
 				if ((space > bestSpace ||
 							(space == bestSpace && attackDistance > bestAttackDistance)) &&
-						gc.can_blueprint(unit.get_id(), toBlueprint, directions[randDirOrder[i]])) {
+						gc.can_blueprint(unit.get_id(), toBlueprint, directions[randDirOrder[i]]) &&
+						!will_blueprint_create_blockage(loc)) {
 					bestAttackDistance = attackDistance;
 					bestSpace = space;
 					best = i;
@@ -1727,6 +1725,7 @@ static bool doBlueprint (Unit& unit, UnitType toBlueprint) {
 		gc.blueprint(unit.get_id(), toBlueprint, dir);
 		MapLocation loc = unit.get_map_location().add(dir);
 		hasFriendlyUnit[loc.get_y()][loc.get_x()] = true;
+		hasFriendlyStructure[loc.get_y()][loc.get_x()] = true;
 		Unit other = gc.sense_unit_at_location(loc);
 
 		if (toBlueprint == Factory) {
@@ -1964,4 +1963,81 @@ static pair<int,int> get_closest_good_position (int y, int x, bool taken_array[5
 		int best = getClosestFreeGoodPositionCandidates[rand() % candidates];
 		return good_list[best];
 	}
+}
+
+// checks whether making a blueprint at loc will block off the surrounding squares from each other
+// does a bfs from one of the adjacent squares for distance search_dist and checks whether it can
+// reach all the other adjacent squares
+static bool will_blueprint_create_blockage(MapLocation loc) {
+	static const int search_dist = 6;
+	int loc_y = loc.get_y();
+	int loc_x = loc.get_x();
+	// Note: need to add/subtract 1 for each of the directions that we reset the seen array
+	// because we start from a square adjacent to loc and then travel search_dist so it's actually search_dist + 1 distance
+	for (int y = std::max(0, loc_y - search_dist - 1); y < std::min(loc_y + search_dist + 1, height - 1); y++) {
+		for (int x = std::max(0, loc_x - search_dist - 1); x < std::min(loc_x + search_dist + 1, width - 1); x++) {
+			bfs_seen[y][x] = false;
+		}
+	}
+
+	int start_y = -1, start_x = -1;
+	for (int i = 0; i < 8; i++) {
+		int ny = loc_y + dy[i];
+		int nx = loc_x + dx[i];
+		if (0 <= ny && ny < height && 0 <= nx && nx < width &&
+				isPassable[ny][nx] &&
+				!hasFriendlyStructure[ny][nx]) {
+			start_y = ny;
+			start_x = nx;
+			break;
+		}
+	}
+
+	if (start_y == -1 || start_x == -1) {
+		// no adjacent squares (which is impossible...) but theoretically if there were no adjacent squares
+		// this wouldn't create a blockage
+		printf("ERROR: Impossible situation in blueprint_wont_create_blockage()");
+		return false;
+	}
+
+	std::queue<std::tuple<int,int,int>> q;
+	q.emplace(start_y, start_x, 0);
+	bfs_seen[start_y][start_x] = true;
+	while (!q.empty()) {
+		int cur_y, cur_x, cur_dist;
+		std::tie(cur_y, cur_x, cur_dist) = q.front();
+		q.pop();
+
+		if (cur_dist >= search_dist) {
+			continue;
+		}
+
+		for (int i = 0; i < 8; i++) {
+			int ny = cur_y + dy[i];
+			int nx = cur_x + dx[i];
+			if (0 <= ny && ny < height && 0 <= nx && nx < width &&
+					!bfs_seen[ny][nx] &&
+					isPassable[ny][nx] &&
+					!hasFriendlyStructure[ny][nx] &&
+					!(ny == loc_y && nx == loc_x)) {
+				bfs_seen[ny][nx] = true;
+				q.emplace(ny, nx, cur_dist + 1);
+			} 
+		}
+	}
+
+	// check if any of the adjacent squares were not reached
+	for (int i = 0; i < 8; i++) {
+		int ny = loc_y + dy[i];
+		int nx = loc_x + dx[i];
+		if (0 <= ny && ny < height && 0 <= nx && nx < width &&
+				isPassable[ny][nx] &&
+				!hasFriendlyStructure[ny][nx]) {
+			if (!bfs_seen[ny][nx]) {
+				return true;
+			}
+		}
+	}
+
+	return false;
 }
