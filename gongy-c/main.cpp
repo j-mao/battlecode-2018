@@ -1853,6 +1853,11 @@ static bool isEnoughResourcesNearby(Unit& unit) {
 }
 
 static bool bfsTowardsBlueprint(Unit& unit) {
+
+	if (SZ(rocketsBeingBuilt) + SZ(factoriesBeingBuilt) == 0) {
+		return false;
+	}
+
 	int dist = 4;
 
 	MapLocation loc = unit.get_map_location();
