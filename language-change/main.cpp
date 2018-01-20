@@ -204,8 +204,7 @@ static bool isEnoughResourcesNearby(Unit& unit);
 static bool tryMoveToLoc (Unit& unit, int distArray[55][55]);
 static void tryToLoadRocket (Unit& unit);
 static MapLocation getClosestFreeGoodPosition(int y, int x);
-static int getDirIndex(Direction dir);
-
+static int get_dir_index (Direction dir);
 
 class compareUnits {
 	public:
@@ -417,7 +416,6 @@ static void init_turn (vector<Unit>& myUnits) {
 					MapLocation damagedUnitLoc = unit.get_map_location();
 					damagedFriendlyHealableUnits.push_back(SimpleState(damagedUnitLoc.get_y(), damagedUnitLoc.get_x()));
 				}
-
 
 				// worker cache position
 				if (unit.get_unit_type() == Worker) {
@@ -636,7 +634,7 @@ static bool is_fighter_unit_type (UnitType unitType) {
 		unitType == Healer;
 }
 
-static  bool is_healable_unit_type (UnitType unitType) {
+static bool is_healable_unit_type (UnitType unitType) {
 	return unitType == Ranger ||
 		unitType == Knight ||
 		unitType == Mage ||
@@ -999,7 +997,7 @@ static void runRanger (Unit& unit) {
 				}
 			} else {
 				// currently 1 move from being in range of enemy
-				if (!doneAttack && gc.is_attack_ready(unit.get_id()) && roundNum % 5== 0) {
+				if (!doneAttack && gc.is_attack_ready(unit.get_id()) && roundNum % 5 == 0) {
 					// move into a position where you can attack
 					int best = -1, bestNumEnemies = 999;
 					shuffleDirOrder();
@@ -1169,7 +1167,7 @@ static void runKnight(Unit& unit) {
 	}
 }
 
-static void runHealer(Unit& unit) {
+static void runHealer (Unit& unit) {
 	bool healDone = tryToHeal(unit);
 	bool moveDone = false;
 
@@ -1243,7 +1241,7 @@ static int getTendency(Unit& unit) {
 		if (attackLocs.empty()) {
 			tendency[unit.get_id()] = rand() % 8;
 		} else if (unit.is_on_map()) {
-			tendency[unit.get_id()] = getDirIndex(unit.get_map_location().direction_to(attackLocs.back()));
+			tendency[unit.get_id()] = get_dir_index(unit.get_map_location().direction_to(attackLocs.back()));
 			//System.out.println("Trying to attack enemy starting location!");
 		} else {
 			// in garrison or space or something
@@ -1866,14 +1864,4 @@ static MapLocation getClosestFreeGoodPosition (int y, int x) {
 		int best = getClosestFreeGoodPositionCandidates[rand() % candidates];
 		return MapLocation(myPlanet, goodPositionsXList[best], goodPositionsYList[best]);
 	}
-}
-
-static int getDirIndex(Direction dir) {
-	// TODO: make this faster?
-	for (int i = 0; i < 8; i++) {
-		if (directions[i] == dir) {
-			return i;
-		}
-	}
-	return 0;
 }
