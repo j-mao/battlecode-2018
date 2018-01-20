@@ -22,7 +22,7 @@
 
 // XXX: Fix for 'this' used inside C code
 #define this it
-#include "bc.h"
+#include <bc.h>
 #undef this
 
 #ifndef MAX_ROUNDS
