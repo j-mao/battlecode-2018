@@ -458,9 +458,9 @@ static void init_turn (vector<Unit>& myUnits) {
 					if (y < 0 || height <= y) continue;
 					for (int x = locX - 10; x <= locX + 10; x++) {
 						if (x < 0 || width <= x) continue;
-						attackDistanceToEnemy[y][x] = min(attackDistanceToEnemy[y][x],
-								(y - locY) * (y - locY) + (x - locX) * (x - locX));
-						if (attackDistanceToEnemy[y][x] <= unit.get_attack_range()) {
+						int myDist = (y-locY) * (y-locY) + (x-locX) * (x-locX);
+						attackDistanceToEnemy[y][x] = min(attackDistanceToEnemy[y][x], myDist);
+						if (myDist <= unit.get_attack_range()) {
 							numEnemiesThatCanAttackSquare[y][x]++;
 						}
 					}
