@@ -268,6 +268,7 @@ struct TimeStats {
 	std::vector<int> times;
 	TimeStats(std::string name) : name(name) {}
 	void add(int time) { times.push_back(time); }
+	void clear() { times.clear(); }
 	void print() {
 		std::sort(times.begin(), times.end());
 		int n = int(times.size());
@@ -284,6 +285,10 @@ struct TimeStats {
 		}
 	}
 };
+
+// Stats section 1: declarations (some of them)
+TimeStats ranger_attack_stats("Ranger Attacks");
+TimeStats ranger_attack_sense_stats("Ranger Attack sense_nearby_units()");
 
 int main() {
 	printf("Player C++ bot starting\n");
@@ -393,6 +398,9 @@ int main() {
 			TimeStats healer_stats("Healer");
 			TimeStats factory_stats("Factory");
 			TimeStats rocket_stats("Rocket");
+			// Stats section 2: clearing 
+			ranger_attack_stats.clear();
+			ranger_attack_sense_stats.clear();
 
 			clock_t before_init_turn = clock();
 
@@ -478,12 +486,15 @@ int main() {
 			clock_t after_units = clock();
 			printf("processing units took %6d microseconds\n", get_microseconds(before_units, after_units));
 
+			// Stats section 3: printing
 			get_unit_stats.print();
 			ranger_stats.print();
 			healer_stats.print();
 			worker_stats.print();
 			factory_stats.print();
 			rocket_stats.print();
+			ranger_attack_stats.print();
+			ranger_attack_sense_stats.print();
 
 			//printf("Number of idle rangers is %3d / %3d\n", numIdleRangers, numRangers);
 
@@ -1162,7 +1173,10 @@ static void runFactory (Unit& unit) {
 
 static void runRanger (Unit& unit) {
 	// try to attack before and after moving
+	clock_t before_attack = clock();
 	bool doneAttack = rangerTryToAttack(unit);
+	clock_t after_attack = clock();
+	ranger_attack_stats.add(get_microseconds(before_attack, after_attack));
 
 	// decide movement
 	if (unit.is_on_map() && gc.is_move_ready(unit.get_id())) {
@@ -1345,7 +1359,10 @@ static void runRanger (Unit& unit) {
 
 	// try to attack before and after moving
 	if (!doneAttack) {
+		clock_t before_attack = clock();
 		rangerTryToAttack(unit);
+		clock_t after_attack = clock();
+		ranger_attack_stats.add(get_microseconds(before_attack, after_attack));
 		doneAttack = true;
 	}
 }
@@ -1626,7 +1643,10 @@ static bool rangerTryToAttack(Unit& unit) {
 		// this radius needs to be at least 1 square larger than the ranger's attack range
 		// because the ranger might move, but the ranger's unit.get_map_location() won't update unless we
 		// call again. So just query a larger area around the ranger's starting location.
+		clock_t before_sense = clock();
 		vector<Unit> units = gc.sense_nearby_units(unit.get_map_location(), 99);
+		clock_t after_sense = clock();
+		ranger_attack_sense_stats.add(get_microseconds(before_sense, after_sense));
 		int whichToAttack = -1, whichToAttackHealth = 999, whichToAttackPriority = -1;
 		for (int i = 0; i < units.size(); i++) {
 			Unit other = units[i];
