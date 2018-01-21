@@ -92,6 +92,12 @@ static vector<Unit> rocketsReady;
 static Team myTeam;
 static Team enemyTeam;
 
+// Map type results
+static const int CANT_REACH_ENEMY = 0;
+static const int PARTIALLY_REACH_ENEMY = 1;
+static const int FULLY_REACH_ENEMY = 2;
+static int reach_enemy_result = -1;
+
 // (Currently not used! Just ignore this xd)
 // Map of how long ago an enemy ranger was seen at some square
 // Stores -1 if a ranger was not seen at that square the last time you were able to sense it (or if you can currently
@@ -134,7 +140,14 @@ static int distToEnemyStartingLocs[55][55];
 
 static int numIdleRangers;
 
+// whether it's "very early game"
+// during the very early game we want our replicating workers to explore as fast as possible
+// currently defined as true until you see an enemy fighting unit, or you reach a square where
+// distance to enemy starting locs <= distance to friendly starting locs
+static bool is_very_early_game;
+
 static const int MultisourceBfsUnreachableMax = 499;
+static bool can_reach_from_spawn[55][55];
 
 // whether the square is "near" enemy units
 // currently defined as being within distance 72 of an enemy
@@ -205,6 +218,9 @@ static void multisourceBfsAvoidingUnitsAndDanger (vector<SimpleState>& startingL
 static bool doReplicate(Unit& unit);
 static void checkForEnemyUnits (vector<Unit>& allUnits);
 
+static void do_flood_fill(vector<SimpleState>& startingLocs, int resultArr[55][55], bool passableArr[55][55], int label);
+static int can_reach_enemy_on_earth();
+
 static bool bfsTowardsBlueprint(Unit& unit);
 static bool doBuild(Unit& unit);
 static bool doBlueprint(Unit& unit, UnitType toBlueprint);
@@ -216,6 +232,9 @@ static pair<int,int> get_closest_good_position (int y, int x, bool taken_array[5
 static int get_dir_index (Direction dir);
 static bool will_blueprint_create_blockage(MapLocation loc);
 static int shortRangeBfsToBestKarbonite(Unit &unit);
+
+static void doBlueprintMovement(Unit &unit, bool &doneMovement);
+static void doKarboniteMovement(Unit &unit, bool &doneMovement);
 
 class compareUnits {
 	public:
@@ -256,6 +275,9 @@ int main() {
 
 	init_global_variables();
 	printf("Finished init_global_variables()\n");
+
+	reach_enemy_result = can_reach_enemy_on_earth();
+	printf("reach_enemy_result: %d\n",reach_enemy_result);
 
 	if (myPlanet == Mars) {
 		while (true) {
@@ -315,7 +337,7 @@ int main() {
 		gc.queue_research(Rocket);
 
 		while (true) {
-			printf("Starting round %d\n", roundNum);
+			//printf("Starting round %d\n", roundNum);
 
 			vector<Unit> units = gc.get_my_units();
 			init_turn(units);
@@ -487,6 +509,9 @@ static void init_turn (vector<Unit>& myUnits) {
 
 			// calculate closest distances to enemy fighter units
 			if (unit.get_location().is_on_map() && is_fighter_unit_type(unit.get_unit_type())) {
+				// we've seen an enemy, mark as not the very early game anymore
+				is_very_early_game = false;
+
 				MapLocation loc = unit.get_map_location();
 				int locY = loc.get_y(), locX = loc.get_x();
 				for (int y = locY - 10; y <= locY + 10; y++) {
@@ -528,7 +553,7 @@ static void init_turn (vector<Unit>& myUnits) {
 			good_healer_positions.push_back(make_pair(y, x));
 		}
 	}
-	printf("%d good healer positions\n", SZ(good_healer_positions));
+	//printf("%d good healer positions\n", SZ(good_healer_positions));
 
 	// calculate good positions
 	good_ranger_positions.clear();
@@ -637,6 +662,8 @@ static void init_global_variables () {
 	fo(i, 0, 8) randDirOrder[i] = i;
 
 	all_pairs_shortest_path();
+
+	is_very_early_game = true;
 }
 
 int get_unit_order_priority (Unit& unit) {
@@ -770,44 +797,31 @@ static void runEarthWorker (Unit& unit) {
 		return;
 	}
 
+	{
+		MapLocation cur_loc = unit.get_map_location();
+		if (distToEnemyStartingLocs[cur_loc.get_y()][cur_loc.get_x()] <=
+				distToMyStartingLocs[cur_loc.get_y()][cur_loc.get_x()]) {
+			// we've reached a square that's closer to the enemy starting locs than our own
+			// mark as not the very early game anymore
+			is_very_early_game = false;
+		}
+	}
+
 	bool doneMovement = !gc.is_move_ready(unit.get_id());
 
 	// movement
 	if (!doneMovement && false /* need to place factory and no adjacent good places and nearby good place */) {
 		// move towards good place
 	}
-	if (!doneMovement && isNextToBuildingBlueprint(unit.get_map_location())) {
-		// if next to blueprint, stay next to blueprint
-		doneMovement = true;
-	}
-	if (!doneMovement) {
-		// if very near a blueprint, move towards it
-
-		if (bfsTowardsBlueprint(unit)) {
-			doneMovement = true;
-		}
-	}
-	if (!doneMovement) {
-		//  move towards karbonite
-		
-		// try to move towards nearby karbonite squares that are nearer the enemy base and further from your own base
-		if (!doneMovement) {
-			int dir_index = shortRangeBfsToBestKarbonite(unit);
-			if (dir_index != DirCenterIndex) {
-				Direction dir = directions[dir_index];
-				doMoveRobot(unit, dir);
-				doneMovement = true;
-			}
-		}
-
-		// otherwise move to the closest karbonite
-		if (!doneMovement) {
-			MapLocation loc = unit.get_map_location();
-			if (distToKarbonite[loc.get_y()][loc.get_x()] != MultisourceBfsUnreachableMax) {
-				tryMoveToLoc(unit, distToKarbonite);
-				doneMovement = true;
-			}
-		}
+	// If it's early game and you're a currently replicating worker, prioritize karbonite over blueprints
+	// Otherwise prioritise blueprints over karbonite
+	// See declaration of is_very_early_game for how we define early game
+	if (is_very_early_game && unit.get_ability_heat() < 20) {
+		doKarboniteMovement(unit, doneMovement);
+		doBlueprintMovement(unit, doneMovement);
+	} else {
+		doBlueprintMovement(unit, doneMovement);
+		doKarboniteMovement(unit, doneMovement);
 	}
 	if (!doneMovement /* next to damaged structure */) {
 		// done, stay next to damaged structure
@@ -1649,6 +1663,70 @@ static void tryToLoadRocket (Unit& unit) {
 	}
 }
 
+static void do_flood_fill (vector<SimpleState>& startingLocs, bool resultArr[55][55], bool passableArr[55][55]) {
+
+	fo(y, 0, height) fo(x, 0, width) {
+		resultArr[y][x] = false;
+	}
+
+	queue<SimpleState> q;
+	for (SimpleState loc: startingLocs){
+		resultArr[loc.y][loc.x] = true;
+		q.push(loc);
+	}
+
+	while (!q.empty()){
+		SimpleState cur = q.front(); q.pop();
+
+		fo(d, 0, 8) {
+			int ny = cur.y + dy[d];
+			int nx = cur.x + dx[d];
+			if (0 <= ny && ny < height && 0 <= nx && nx < width && passableArr[ny][nx] && !resultArr[ny][nx]) {
+				resultArr[ny][nx] = true;
+
+				q.push(SimpleState(ny,nx));
+			}
+		}
+	}
+}
+
+static int can_reach_enemy_on_earth () {
+
+	//returns either CANT_REACH_ENEMY, PARTIALLY_REACH_ENEMY or FULLY_REACH_ENEMY
+
+	vector<SimpleState> spawn_locs;
+	vector<Unit> initial_units = EarthMap.get_initial_units();
+
+	fo(i, 0, SZ(initial_units)) {
+		Unit& unit = initial_units[i];
+		if (unit.get_team() == myTeam) {
+			MapLocation loc = unit.get_map_location();
+			spawn_locs.push_back(SimpleState(loc.get_y(),loc.get_x()));
+		}
+	}
+
+	do_flood_fill(spawn_locs, can_reach_from_spawn, isPassable);
+
+	bool doReachSomeEnemy = false;
+	bool doMissSomeEnemy = false;
+
+	fo(i, 0, SZ(initial_units)) {
+		Unit& unit = initial_units[i];
+		if (unit.get_team() == enemyTeam){
+			MapLocation loc = unit.get_map_location();
+			if (can_reach_from_spawn[loc.get_y()][loc.get_x()]) {
+				doReachSomeEnemy = true;
+			} else{
+				doMissSomeEnemy = true;
+			}
+		}
+	}
+
+	if (doReachSomeEnemy && !doMissSomeEnemy) return FULLY_REACH_ENEMY;
+	if (doReachSomeEnemy) return PARTIALLY_REACH_ENEMY;
+	return CANT_REACH_ENEMY;
+}
+
 // finds the shortest distance to all squares from an array of starting locations
 // unreachable squares get distance MultisourceBfsUnreachableMax
 // dangerous squares get MultisourceBfsUnreachableMax + 300 - sq distance to enemy
@@ -2189,4 +2267,43 @@ static int shortRangeBfsToBestKarbonite(Unit &unit) {
 	}
 
 	return best_dir;
+}
+
+static void doBlueprintMovement(Unit &unit, bool &doneMovement) {
+	if (!doneMovement && isNextToBuildingBlueprint(unit.get_map_location())) {
+		// if next to blueprint, stay next to blueprint
+		doneMovement = true;
+	}
+	if (!doneMovement) {
+		// if very near a blueprint, move towards it
+
+		if (bfsTowardsBlueprint(unit)) {
+			doneMovement = true;
+		}
+	}
+}
+
+static void doKarboniteMovement(Unit &unit, bool &doneMovement) {
+	if (!doneMovement) {
+		//  move towards karbonite
+
+		// try to move towards nearby karbonite squares that are nearer the enemy base and further from your own base
+		if (!doneMovement) {
+			int dir_index = shortRangeBfsToBestKarbonite(unit);
+			if (dir_index != DirCenterIndex) {
+				Direction dir = directions[dir_index];
+				doMoveRobot(unit, dir);
+				doneMovement = true;
+			}
+		}
+
+		// otherwise move to the closest karbonite
+		if (!doneMovement) {
+			MapLocation loc = unit.get_map_location();
+			if (distToKarbonite[loc.get_y()][loc.get_x()] != MultisourceBfsUnreachableMax) {
+				tryMoveToLoc(unit, distToKarbonite);
+				doneMovement = true;
+			}
+		}
+	}
 }
