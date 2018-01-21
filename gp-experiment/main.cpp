@@ -134,6 +134,12 @@ static int distToEnemyStartingLocs[55][55];
 
 static int numIdleRangers;
 
+// whether it's "very early game"
+// during the very early game we want our replicating workers to explore as fast as possible
+// currently defined as true until you see an enemy fighting unit, or you reach a square where
+// distance to enemy starting locs <= distance to friendly starting locs
+static bool is_very_early_game;
+
 static const int MultisourceBfsUnreachableMax = 499;
 
 // whether the square is "near" enemy units
@@ -216,6 +222,9 @@ static pair<int,int> get_closest_good_position (int y, int x, bool taken_array[5
 static int get_dir_index (Direction dir);
 static bool will_blueprint_create_blockage(MapLocation loc);
 static int shortRangeBfsToBestKarbonite(Unit &unit);
+
+static void doBlueprintMovement(Unit &unit, bool &doneMovement);
+static void doKarboniteMovement(Unit &unit, bool &doneMovement);
 
 class compareUnits {
 	public:
@@ -487,6 +496,9 @@ static void init_turn (vector<Unit>& myUnits) {
 
 			// calculate closest distances to enemy fighter units
 			if (unit.get_location().is_on_map() && is_fighter_unit_type(unit.get_unit_type())) {
+				// we've seen an enemy, mark as not the very early game anymore
+				is_very_early_game = false;
+
 				MapLocation loc = unit.get_map_location();
 				int locY = loc.get_y(), locX = loc.get_x();
 				for (int y = locY - 10; y <= locY + 10; y++) {
@@ -637,6 +649,8 @@ static void init_global_variables () {
 	fo(i, 0, 8) randDirOrder[i] = i;
 
 	all_pairs_shortest_path();
+
+	is_very_early_game = true;
 }
 
 int get_unit_order_priority (Unit& unit) {
@@ -770,44 +784,31 @@ static void runEarthWorker (Unit& unit) {
 		return;
 	}
 
+	{
+		MapLocation cur_loc = unit.get_map_location();
+		if (distToEnemyStartingLocs[cur_loc.get_y()][cur_loc.get_x()] <=
+				distToMyStartingLocs[cur_loc.get_y()][cur_loc.get_x()]) {
+			// we've reached a square that's closer to the enemy starting locs than our own
+			// mark as not the very early game anymore
+			is_very_early_game = false;
+		}
+	}
+
 	bool doneMovement = !gc.is_move_ready(unit.get_id());
 
 	// movement
 	if (!doneMovement && false /* need to place factory and no adjacent good places and nearby good place */) {
 		// move towards good place
 	}
-	if (!doneMovement && isNextToBuildingBlueprint(unit.get_map_location())) {
-		// if next to blueprint, stay next to blueprint
-		doneMovement = true;
-	}
-	if (!doneMovement) {
-		// if very near a blueprint, move towards it
-
-		if (bfsTowardsBlueprint(unit)) {
-			doneMovement = true;
-		}
-	}
-	if (!doneMovement) {
-		//  move towards karbonite
-		
-		// try to move towards nearby karbonite squares that are nearer the enemy base and further from your own base
-		if (!doneMovement) {
-			int dir_index = shortRangeBfsToBestKarbonite(unit);
-			if (dir_index != DirCenterIndex) {
-				Direction dir = directions[dir_index];
-				doMoveRobot(unit, dir);
-				doneMovement = true;
-			}
-		}
-
-		// otherwise move to the closest karbonite
-		if (!doneMovement) {
-			MapLocation loc = unit.get_map_location();
-			if (distToKarbonite[loc.get_y()][loc.get_x()] != MultisourceBfsUnreachableMax) {
-				tryMoveToLoc(unit, distToKarbonite);
-				doneMovement = true;
-			}
-		}
+	// If it's early game and you're a currently replicating worker, prioritize karbonite over blueprints
+	// Otherwise prioritise blueprints over karbonite
+	// See declaration of is_very_early_game for how we define early game
+	if (is_very_early_game && unit.get_ability_heat() < 20) {
+		doKarboniteMovement(unit, doneMovement);
+		doBlueprintMovement(unit, doneMovement);
+	} else {
+		doBlueprintMovement(unit, doneMovement);
+		doKarboniteMovement(unit, doneMovement);
 	}
 	if (!doneMovement /* next to damaged structure */) {
 		// done, stay next to damaged structure
@@ -2189,4 +2190,43 @@ static int shortRangeBfsToBestKarbonite(Unit &unit) {
 	}
 
 	return best_dir;
+}
+
+static void doBlueprintMovement(Unit &unit, bool &doneMovement) {
+	if (!doneMovement && isNextToBuildingBlueprint(unit.get_map_location())) {
+		// if next to blueprint, stay next to blueprint
+		doneMovement = true;
+	}
+	if (!doneMovement) {
+		// if very near a blueprint, move towards it
+
+		if (bfsTowardsBlueprint(unit)) {
+			doneMovement = true;
+		}
+	}
+}
+
+static void doKarboniteMovement(Unit &unit, bool &doneMovement) {
+	if (!doneMovement) {
+		//  move towards karbonite
+		
+		// try to move towards nearby karbonite squares that are nearer the enemy base and further from your own base
+		if (!doneMovement) {
+			int dir_index = shortRangeBfsToBestKarbonite(unit);
+			if (dir_index != DirCenterIndex) {
+				Direction dir = directions[dir_index];
+				doMoveRobot(unit, dir);
+				doneMovement = true;
+			}
+		}
+
+		// otherwise move to the closest karbonite
+		if (!doneMovement) {
+			MapLocation loc = unit.get_map_location();
+			if (distToKarbonite[loc.get_y()][loc.get_x()] != MultisourceBfsUnreachableMax) {
+				tryMoveToLoc(unit, distToKarbonite);
+				doneMovement = true;
+			}
+		}
+	}
 }
