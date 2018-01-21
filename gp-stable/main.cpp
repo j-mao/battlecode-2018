@@ -215,7 +215,7 @@ static void tryToLoadRocket (Unit& unit);
 static pair<int,int> get_closest_good_position (int y, int x, bool taken_array[55][55], vector<pair<int, int>>& good_list);
 static int get_dir_index (Direction dir);
 static bool will_blueprint_create_blockage(MapLocation loc);
-static bool shortRangeBfsToKarbonite(Unit &unit);
+static int shortRangeBfsToBestKarbonite(Unit &unit);
 
 class compareUnits {
 	public:
@@ -791,8 +791,13 @@ static void runEarthWorker (Unit& unit) {
 		//  move towards karbonite
 		
 		// try to move towards nearby karbonite squares that are nearer the enemy base and further from your own base
-		if (!doneMovement && shortRangeBfsToKarbonite(unit)) {
-			doneMovement = true;
+		if (!doneMovement) {
+			int dir_index = shortRangeBfsToBestKarbonite(unit);
+			if (dir_index != DirCenterIndex) {
+				Direction dir = directions[dir_index];
+				doMoveRobot(unit, dir);
+				doneMovement = true;
+			}
 		}
 
 		// otherwise move to the closest karbonite
@@ -1393,12 +1398,13 @@ static bool tryMoveToLoc (Unit& unit, int distArray[55][55]) {
 	int bestDist = -1;
 	int bestDir = -1;
 
+	shuffleDirOrder();
 	for (int i = 0; i < 8; i++) {
-		if (gc.can_move(unit.get_id(), directions[i])) {
-			int tmpDist = distArray[myY + dy[i]][myX + dx[i]];
+		if (gc.can_move(unit.get_id(), directions[randDirOrder[i]])) {
+			int tmpDist = distArray[myY + dy[randDirOrder[i]]][myX + dx[randDirOrder[i]]];
 			if (bestDist == -1 || tmpDist < bestDist) {
 				bestDist = tmpDist;
-				bestDir = i;
+				bestDir = randDirOrder[i];
 			}
 		}
 	}
@@ -1685,19 +1691,55 @@ static void multisourceBfsAvoidingUnitsAndDanger (vector<SimpleState>& startingL
 }
 
 static bool doReplicate(Unit& unit) {
-	// try to replicate next to currently building factory
-	shuffleDirOrder();
+	if (unit.get_ability_heat() >= 10) {
+		// on cooldown
+		return false;
+	}
+
 	Direction replicateDir = Center;
-	for (int i = 0; i < 8; i++) {
-		Direction dir = directions[randDirOrder[i]];
-		if (gc.can_replicate(unit.get_id(), dir) &&
-				isNextToBuildingBlueprint(unit.get_map_location().add(dir))) {
-			replicateDir = dir;
-			break;
+	MapLocation cur_loc = unit.get_map_location();
+
+	// If you are closer to your own base than your opponents, then:
+	// Try to replicate towards best karbonite (ie karbonite close to enemy and far from your own base)
+	// But don't go too far or you'll leave your own karbonite unfarmed
+	// (Example map to see this is testmap. If you get too aggressive with stealing your opponents karbonite,
+	// then you just switch places with the enemy team and get holed up in their corner...)
+	// shortRangeBfsToBestKarbonite will return Center if none is found.
+	if (replicateDir == Center && distToEnemyStartingLocs[cur_loc.get_y()][cur_loc.get_x()] >
+			distToMyStartingLocs[cur_loc.get_y()][cur_loc.get_x()]) {
+		// get direction as an int
+		int karbonite_dir = shortRangeBfsToBestKarbonite(unit);
+
+		if (karbonite_dir != DirCenterIndex) {
+			// now find the direction closest to karbonite_dir that you can replicate in
+			int cur_dir = karbonite_dir;
+			for (int i = 0; i < 8; i++) {
+				if (i & 1) cur_dir = (cur_dir + i) % 8;
+				else cur_dir = (cur_dir + 8 - i) % 8;
+				if (gc.can_replicate(unit.get_id(), directions[cur_dir])) {
+					replicateDir = directions[cur_dir];
+					break;
+				}
+			}
 		}
 	}
+
+	// otherwise try to replicate next to currently building factory
+	if (replicateDir == Center) {
+		shuffleDirOrder();
+		for (int i = 0; i < 8; i++) {
+			Direction dir = directions[randDirOrder[i]];
+			if (gc.can_replicate(unit.get_id(), dir) &&
+					isNextToBuildingBlueprint(unit.get_map_location().add(dir))) {
+				replicateDir = dir;
+				break;
+			}
+		}
+	}
+
 	// otherwise, replicate wherever
 	if (replicateDir == Center) {
+		shuffleDirOrder();
 		for (int i = 0; i < 8; i++) {
 			Direction dir = directions[randDirOrder[i]];
 			if (gc.can_replicate(unit.get_id(), dir)) {
@@ -1706,6 +1748,7 @@ static bool doReplicate(Unit& unit) {
 			}
 		}
 	}
+
 	if (replicateDir != Center) {
 		gc.replicate(unit.get_id(), replicateDir);
 		MapLocation loc = unit.get_map_location().add(replicateDir);
@@ -2090,7 +2133,9 @@ static bool will_blueprint_create_blockage(MapLocation loc) {
 // and closer to their base
 // In particular, this square searches for the square within distance search_dist that has
 // the minimum (distance to enemy starting locs - distance to my starting locs)
-static bool shortRangeBfsToKarbonite(Unit &unit) {
+// Edit: We don't want to go too far towards the enemy, so we cap the distance metric so it can't go below 0.
+// Returns Center if no other karbonite is found
+static int shortRangeBfsToBestKarbonite(Unit &unit) {
 	static const int search_dist = 4;
 
 	MapLocation loc = unit.get_map_location();
@@ -2113,7 +2158,8 @@ static bool shortRangeBfsToKarbonite(Unit &unit) {
 		std::tie(cur_y, cur_x, cur_dist, cur_starting_dir) = q.front();
 		q.pop();
 
-		int cur_dist_metric = distToEnemyStartingLocs[cur_y][cur_x] - distToMyStartingLocs[cur_y][cur_x];
+		int cur_dist_metric =
+			std::max(0, distToEnemyStartingLocs[cur_y][cur_x] - distToMyStartingLocs[cur_y][cur_x]);
 		if (lastKnownKarboniteAmount[cur_y][cur_x] > 0 && cur_dist_metric < best_dist_metric) {
 			best_dist_metric = cur_dist_metric;
 			best_dir = cur_starting_dir;
@@ -2142,10 +2188,5 @@ static bool shortRangeBfsToKarbonite(Unit &unit) {
 		}
 	}
 
-	if (best_dir != DirCenterIndex) {
-		doMoveRobot(unit, directions[best_dir]);
-		return true;
-	} else {
-		return false;
-	}
+	return best_dir;
 }
