@@ -129,6 +129,9 @@ static int bfsTowardsBlueprintDist[55][55];
 
 static int numEnemiesThatCanAttackSquare[55][55];
 
+static int distToMyStartingLocs[55][55];
+static int distToEnemyStartingLocs[55][55];
+
 static int numIdleRangers;
 
 static const int MultisourceBfsUnreachableMax = 499;
@@ -212,6 +215,7 @@ static void tryToLoadRocket (Unit& unit);
 static pair<int,int> get_closest_good_position (int y, int x, bool taken_array[55][55], vector<pair<int, int>>& good_list);
 static int get_dir_index (Direction dir);
 static bool will_blueprint_create_blockage(MapLocation loc);
+static bool shortRangeBfsToKarbonite(Unit &unit);
 
 class compareUnits {
 	public:
@@ -311,7 +315,7 @@ int main() {
 		gc.queue_research(Rocket);
 
 		while (true) {
-			// printf("Starting round %d\n", roundNum);
+			printf("Starting round %d\n", roundNum);
 
 			vector<Unit> units = gc.get_my_units();
 			init_turn(units);
@@ -356,6 +360,8 @@ int main() {
 				}
 
 			}
+
+			//printf("Number of idle rangers is %3d / %3d\n", numIdleRangers, numRangers);
 
 			fflush(stdout);
 			gc.next_turn();
@@ -538,6 +544,7 @@ static void init_turn (vector<Unit>& myUnits) {
 			isSquareDangerous[y][x] = true;
 		}
 	}
+	//printf("Number of good ranger positions: %d\n", int(good_ranger_positions.size()));
 
 	while (!allMyUnits.empty()) {
 		allMyUnits.pop();
@@ -612,11 +619,20 @@ static void init_global_variables () {
 	}
 
 	vector<Unit> units = myMap.get_initial_units();
+	vector<SimpleState> myStartingUnits;
+	vector<SimpleState> enemyStartingUnits;
 	fo(i, 0, SZ(units)) {
-		if (units[i].get_team() != myTeam) {
+		MapLocation loc = units[i].get_map_location();
+		if (units[i].get_team() == myTeam) {
+			myStartingUnits.push_back(SimpleState(loc.get_y(), loc.get_x()));
+		} else {
 			attackLocs.push_back(units[i].get_map_location());
+			enemyStartingUnits.push_back(SimpleState(loc.get_y(), loc.get_x()));
 		}
 	}
+
+	multisourceBfsAvoidingUnitsAndDanger(myStartingUnits, distToMyStartingLocs);
+	multisourceBfsAvoidingUnitsAndDanger(enemyStartingUnits, distToEnemyStartingLocs);
 
 	fo(i, 0, 8) randDirOrder[i] = i;
 
@@ -773,10 +789,19 @@ static void runEarthWorker (Unit& unit) {
 	}
 	if (!doneMovement) {
 		//  move towards karbonite
-		MapLocation loc = unit.get_map_location();
-		if (distToKarbonite[loc.get_y()][loc.get_x()] != MultisourceBfsUnreachableMax) {
-			tryMoveToLoc(unit, distToKarbonite);
+		
+		// try to move towards nearby karbonite squares that are nearer the enemy base and further from your own base
+		if (!doneMovement && shortRangeBfsToKarbonite(unit)) {
 			doneMovement = true;
+		}
+
+		// otherwise move to the closest karbonite
+		if (!doneMovement) {
+			MapLocation loc = unit.get_map_location();
+			if (distToKarbonite[loc.get_y()][loc.get_x()] != MultisourceBfsUnreachableMax) {
+				tryMoveToLoc(unit, distToKarbonite);
+				doneMovement = true;
+			}
 		}
 	}
 	if (!doneMovement /* next to damaged structure */) {
@@ -833,7 +858,9 @@ static void runEarthWorker (Unit& unit) {
 		}
 	}
 
-	if (!doneAction) {
+	// hard code not building factory on round 1 so that we can replicate
+	if (roundNum > 1 && !doneAction) {
+		// if you can blueprint factory/rocket and want to blueprint factory/rocket...
 		if (gc.get_karbonite() >= 100 &&
 				(numFactories + numFactoryBlueprints < 3 ||
 				 gc.get_karbonite() >= 130 + (numFactories + numFactoryBlueprints - 3) * 15)) {
@@ -848,8 +875,6 @@ static void runEarthWorker (Unit& unit) {
 			}
 
 		}
-
-		// can blueprint factory/rocket and want to blueprint factory/rocket...
 
 		// TODO: try to move to a location with space if the adjacent spaces are too cramped to build a blueprint
 
@@ -1032,29 +1057,37 @@ static void runRanger (Unit& unit) {
 			if (attackDistanceToEnemy[myY][myX] <= RangerAttackRange) {
 				// currently in range of enemy
 
-				if (doneAttack) {
-					// just completed an attack, move backwards now to kite if you can
-
-					int best = -1, bestNumEnemies = 999, bestAttackDist = -1;
-					for (int i = 0; i < 8; i++) {
-						Direction dir = directions[i];
-						MapLocation loc = unit.get_map_location().add(dir);
-						if (0 <= loc.get_y() && loc.get_y() < height &&
-								0 <= loc.get_x() && loc.get_x() < width) {
-							int numEnemies = numEnemiesThatCanAttackSquare[loc.get_y()][loc.get_x()];
-							int attackDist = attackDistanceToEnemy[loc.get_y()][loc.get_x()];
-							if (numEnemies < bestNumEnemies ||
-									(numEnemies == bestNumEnemies && attackDist > bestAttackDist)) {
-								best = i;
-								bestNumEnemies = numEnemies;
-								bestAttackDist = attackDist;
-							}
+				// find which square would be best to kite to (even if your movement is currently on cd)
+				int best = -1, bestNumEnemies = 999, bestAttackDist = -1;
+				for (int i = 0; i < 8; i++) {
+					Direction dir = directions[i];
+					MapLocation loc = unit.get_map_location().add(dir);
+					if (0 <= loc.get_y() && loc.get_y() < height &&
+							0 <= loc.get_x() && loc.get_x() < width) {
+						int numEnemies = numEnemiesThatCanAttackSquare[loc.get_y()][loc.get_x()];
+						int attackDist = attackDistanceToEnemy[loc.get_y()][loc.get_x()];
+						if (numEnemies < bestNumEnemies ||
+								(numEnemies == bestNumEnemies && attackDist > bestAttackDist)) {
+							best = i;
+							bestNumEnemies = numEnemies;
+							bestAttackDist = attackDist;
 						}
 					}
+				}
+
+				if (doneAttack) {
+					// just completed an attack, move backwards now to kite if you can
 
 					if (best != -1 && bestNumEnemies < numEnemiesThatCanAttackSquare[myY][myX]) {
 						// System.out.println("kiting backwards!");
 						doMoveRobot(unit, directions[best]);
+
+						// if current square is a good position, mark it
+						MapLocation after_loc = unit.get_map_location().add(directions[best]);
+						if (is_good_ranger_position[after_loc.get_y()][after_loc.get_x()])
+						{
+							is_good_ranger_position_taken[after_loc.get_y()][after_loc.get_x()] = true;
+						}
 					}
 
 					// if you didn't find a good square, don't waste your move cd, just wait for next turn
@@ -1063,6 +1096,16 @@ static void runRanger (Unit& unit) {
 				} else {
 					// wait for your next attack before kiting back, so don't move yet
 					doneMove = true;
+
+					// if the square you want to kite to is a good position, mark it as taken
+					// (same code as the if() clause, but just don't move)
+					if (best != -1 && bestNumEnemies < numEnemiesThatCanAttackSquare[myY][myX]) {
+						MapLocation after_loc = unit.get_map_location().add(directions[best]);
+						if (is_good_ranger_position[after_loc.get_y()][after_loc.get_x()])
+						{
+							is_good_ranger_position_taken[after_loc.get_y()][after_loc.get_x()] = true;
+						}
+					}	
 				}
 			} else {
 				// currently 1 move from being in range of enemy
@@ -1153,11 +1196,12 @@ static void runRanger (Unit& unit) {
 
 			// otherwise, try to move to good position
 			pair<int,int> best_good = get_closest_good_position(myY, myX, is_good_ranger_position_taken, good_ranger_positions);
+			//printf("I'm at %d %d and I'm moving to good location %d %d\n", unit.get_map_location().get_x(),
+			//	unit.get_map_location().get_y(), best_good.second, best_good.first);
 			if (!doneMove && best_good.first != -1) {
 				int y = best_good.first;
 				int x = best_good.second;
 				is_good_ranger_position_taken[y][x] = true;
-				//System.out.println("I'm at " + unit.get_map_location().toString() + " and I'm moving to good location " + closestFreeGoodPosition.toString());
 				tryMoveToLoc(unit, dis[y][x]);
 				doneMove = true;
 			}
@@ -1974,8 +2018,8 @@ static bool will_blueprint_create_blockage(MapLocation loc) {
 	int loc_x = loc.get_x();
 	// Note: need to add/subtract 1 for each of the directions that we reset the seen array
 	// because we start from a square adjacent to loc and then travel search_dist so it's actually search_dist + 1 distance
-	for (int y = std::max(0, loc_y - search_dist - 1); y < std::min(loc_y + search_dist + 1, height - 1); y++) {
-		for (int x = std::max(0, loc_x - search_dist - 1); x < std::min(loc_x + search_dist + 1, width - 1); x++) {
+	for (int y = std::max(0, loc_y - search_dist - 1); y <= std::min(loc_y + search_dist + 1, height - 1); y++) {
+		for (int x = std::max(0, loc_x - search_dist - 1); x <= std::min(loc_x + search_dist + 1, width - 1); x++) {
 			bfs_seen[y][x] = false;
 		}
 	}
@@ -2040,4 +2084,67 @@ static bool will_blueprint_create_blockage(MapLocation loc) {
 	}
 
 	return false;
+}
+
+// bfs towards karbonite, and if you're already on karbonite, move towards squares that are further from your base
+// and closer to their base
+// In particular, this square searches for the square within distance search_dist that has
+// the minimum (distance to enemy starting locs - distance to my starting locs)
+static bool shortRangeBfsToKarbonite(Unit &unit) {
+	static const int search_dist = 4;
+
+	MapLocation loc = unit.get_map_location();
+	int start_y = loc.get_y();
+	int start_x = loc.get_x();
+	for (int y = std::max(start_y - search_dist, 0); y <= std::min(start_y + search_dist, height - 1); y++) {
+		for (int x = std::max(start_x - search_dist, 0); x <= std::min(start_x + search_dist, width - 1); x++) {
+			bfs_seen[y][x] = false;
+		}
+	}
+
+	std::queue<std::tuple<int,int,int,int>> q;
+	q.emplace(start_y, start_x, 0, DirCenterIndex);
+	bfs_seen[start_y][start_x] = true;
+
+	// distance metric described in comment above
+	int best_dist_metric = 99999999, best_dir = DirCenterIndex;
+	while (!q.empty()) {
+		int cur_y, cur_x, cur_dist, cur_starting_dir;
+		std::tie(cur_y, cur_x, cur_dist, cur_starting_dir) = q.front();
+		q.pop();
+
+		int cur_dist_metric = distToEnemyStartingLocs[cur_y][cur_x] - distToMyStartingLocs[cur_y][cur_x];
+		if (lastKnownKarboniteAmount[cur_y][cur_x] > 0 && cur_dist_metric < best_dist_metric) {
+			best_dist_metric = cur_dist_metric;
+			best_dir = cur_starting_dir;
+		}
+
+		if (cur_dist >= search_dist) {
+			continue;
+		}
+
+		for (int i = 0; i < 8; i++) {
+			int ny = cur_y + dy[i];
+			int nx = cur_x + dx[i];
+			if (0 <= ny && ny < height &&
+					0 <= nx && nx < width &&
+					isPassable[ny][nx] &&
+					!hasFriendlyUnit[ny][nx] &&
+					!bfs_seen[ny][nx]) {
+				if (cur_dist == 0) {
+					// first move, set the starting direction
+					cur_starting_dir = i;
+				}
+				bfs_seen[ny][nx] = true;
+				q.emplace(ny, nx, cur_dist + 1, cur_starting_dir);
+			}
+		}
+	}
+
+	if (best_dir != DirCenterIndex) {
+		doMoveRobot(unit, directions[best_dir]);
+		return true;
+	} else {
+		return false;
+	}
 }

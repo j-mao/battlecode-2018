@@ -361,7 +361,7 @@ int main() {
 
 			}
 
-			printf("Number of idle rangers is %3d / %3d\n", numIdleRangers, numRangers);
+			//printf("Number of idle rangers is %3d / %3d\n", numIdleRangers, numRangers);
 
 			fflush(stdout);
 			gc.next_turn();
@@ -544,7 +544,7 @@ static void init_turn (vector<Unit>& myUnits) {
 			isSquareDangerous[y][x] = true;
 		}
 	}
-	printf("Number of good ranger positions: %d\n", int(good_ranger_positions.size()));
+	//printf("Number of good ranger positions: %d\n", int(good_ranger_positions.size()));
 
 	while (!allMyUnits.empty()) {
 		allMyUnits.pop();
@@ -1196,8 +1196,8 @@ static void runRanger (Unit& unit) {
 
 			// otherwise, try to move to good position
 			pair<int,int> best_good = get_closest_good_position(myY, myX, is_good_ranger_position_taken, good_ranger_positions);
-			printf("I'm at %d %d and I'm moving to good location %d %d\n", unit.get_map_location().get_x(),
-				unit.get_map_location().get_y(), best_good.second, best_good.first);
+			//printf("I'm at %d %d and I'm moving to good location %d %d\n", unit.get_map_location().get_x(),
+			//	unit.get_map_location().get_y(), best_good.second, best_good.first);
 			if (!doneMove && best_good.first != -1) {
 				int y = best_good.first;
 				int x = best_good.second;
@@ -2123,9 +2123,10 @@ static bool shortRangeBfsToKarbonite(Unit &unit) {
 			continue;
 		}
 
+		shuffleDirOrder();
 		for (int i = 0; i < 8; i++) {
-			int ny = cur_y + dy[i];
-			int nx = cur_x + dx[i];
+			int ny = cur_y + dy[randDirOrder[i]];
+			int nx = cur_x + dx[randDirOrder[i]];
 			if (0 <= ny && ny < height &&
 					0 <= nx && nx < width &&
 					isPassable[ny][nx] &&
@@ -2133,7 +2134,7 @@ static bool shortRangeBfsToKarbonite(Unit &unit) {
 					!bfs_seen[ny][nx]) {
 				if (cur_dist == 0) {
 					// first move, set the starting direction
-					cur_starting_dir = i;
+					cur_starting_dir = randDirOrder[i];
 				}
 				bfs_seen[ny][nx] = true;
 				q.emplace(ny, nx, cur_dist + 1, cur_starting_dir);
