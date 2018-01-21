@@ -2123,9 +2123,10 @@ static bool shortRangeBfsToKarbonite(Unit &unit) {
 			continue;
 		}
 
+		shuffleDirOrder();
 		for (int i = 0; i < 8; i++) {
-			int ny = cur_y + dy[i];
-			int nx = cur_x + dx[i];
+			int ny = cur_y + dy[randDirOrder[i]];
+			int nx = cur_x + dx[randDirOrder[i]];
 			if (0 <= ny && ny < height &&
 					0 <= nx && nx < width &&
 					isPassable[ny][nx] &&
@@ -2133,7 +2134,7 @@ static bool shortRangeBfsToKarbonite(Unit &unit) {
 					!bfs_seen[ny][nx]) {
 				if (cur_dist == 0) {
 					// first move, set the starting direction
-					cur_starting_dir = i;
+					cur_starting_dir = randDirOrder[i];
 				}
 				bfs_seen[ny][nx] = true;
 				q.emplace(ny, nx, cur_dist + 1, cur_starting_dir);
