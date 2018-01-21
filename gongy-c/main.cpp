@@ -8,6 +8,7 @@
 
 #include <utility>
 #include <map>
+#include <set>
 #include <vector>
 #include <queue>
 #include <algorithm>
@@ -60,11 +61,14 @@ static int manhattanDistanceToNearestEnemy[55][55];
 // Warning: constant used, would need to change this if the maps got bigger... but they probably won't get bigger so whatever.
 static const int ManhattanDistanceNotSeen = 499;
 
+
 GameController gc;
 
 static vector<Direction> directions;
 static map<int, int> tendency; // TODO : test unordered map
 static vector<MapLocation> attackLocs;
+
+static set< pair<int,int> > rocketLandingLocations;
 
 static int width, height;
 static bool isPassable[55][55];
@@ -91,6 +95,11 @@ static vector<Unit> rocketsReady;
 static Team myTeam;
 static Team enemyTeam;
 
+// Map type results
+static const int CANT_REACH_ENEMY = 0;
+static const int PARTIALLY_REACH_ENEMY = 1;
+static const int FULLY_REACH_ENEMY = 2;
+static int reach_enemy_result = -1;
 // (Currently not used! Just ignore this xd)
 // Map of how long ago an enemy ranger was seen at some square
 // Stores -1 if a ranger was not seen at that square the last time you were able to sense it (or if you can currently
@@ -131,6 +140,7 @@ static int numEnemiesThatCanAttackSquare[55][55];
 static int numIdleRangers;
 
 static const int MultisourceBfsUnreachableMax = 499;
+static int reachEnemyFloodFillResult[55][55];
 
 // whether the square is "near" enemy units
 // currently defined as being within distance 72 of an enemy
@@ -200,6 +210,9 @@ static bool tryToHeal(Unit& unit);
 static void multisourceBfsAvoidingUnitsAndDanger (vector<SimpleState>& startingLocs, int resultArr[55][55]);
 static bool doReplicate(Unit& unit);
 static void checkForEnemyUnits (vector<Unit>& allUnits);
+
+static void performFloodFill(vector<SimpleState>& startingLocs, int resultArr[55][55], bool passableArr[55][55], int label);
+static int can_reach_enemy_on_earth();
 
 static bool bfsTowardsBlueprint(Unit& unit);
 static bool doBuild(Unit& unit);
@@ -308,6 +321,8 @@ int main() {
 		gc.queue_research(Rocket);
 		gc.queue_research(Rocket);
 
+        reach_enemy_result = can_reach_enemy_on_earth();
+        printf("reach_enemy_result: %d\n",reach_enemy_result);
 		while (true) {
 			// printf("Starting round %d\n", roundNum);
 
@@ -329,6 +344,7 @@ int main() {
 				if (!unit.is_on_map()) {
 					continue;
 				}
+
 
 				switch (unit.get_unit_type()) {
 					case Worker:
@@ -584,6 +600,7 @@ static void start_racing_to_mars () {
 
 static void init_global_variables () {
 
+    
 	fo(i, 0, 8) directions.push_back((Direction) i);
 
 	roundNum = 1;
@@ -1633,6 +1650,61 @@ static void multisourceBfsAvoidingUnitsAndDanger (vector<SimpleState>& startingL
 	}
 }
 
+static void performFloodFill(vector<SimpleState>& startingLocs, int resultArr[55][55], bool passableArr[55][55], int label){
+    //Will overwrite previous values if called on the same component more then once
+    //passableArr for use on both earth and mars
+    queue<SimpleState> q;
+    for (SimpleState loc: startingLocs){
+        resultArr[loc.y][loc.x]=label;
+        q.push(loc);
+    }
+        
+    while (!q.empty()){
+        SimpleState cur = q.front(); q.pop();
+        
+        for (int d = 0; d<8; d++){
+            int ny = cur.y + dy[d];
+			int nx = cur.x + dx[d];
+            if (0 <= ny && ny < height && 0 <= nx && nx < width && passableArr[ny][nx] && resultArr[ny][nx]!=label){
+                resultArr[ny][nx]=label;
+                
+                q.push(SimpleState(ny,nx));
+            }
+        }
+    }
+}
+
+static int can_reach_enemy_on_earth(){
+    //returns either CANT_REACH_ENEMY, PARTIALLY_REACH_ENEMY or FULLY_REACH_ENEMY
+    vector<SimpleState> startingLocs;
+    for (Unit unit: gc.get_my_units()){
+        //Implict guarantee that all units are on earth at the start of the round
+        MapLocation loc = unit.get_map_location();
+        startingLocs.push_back(SimpleState(loc.get_y(),loc.get_x()));
+    }
+    //Unecessary, given the guarantee of all things being initalised to 0
+    fo(y, 0, height) fo(x, 0, width) {
+		reachEnemyFloodFillResult[y][x]=0;
+	}
+    //Even if there wasn't the guarantee, we could just choose a random integer, and the chance of collision would be v.low
+    performFloodFill(startingLocs, reachEnemyFloodFillResult, isPassable, 1);
+    
+    bool doReachSomeEnemy = false;
+    bool doMissSomeEnemy = false;
+
+    for (Unit unit: gc.get_starting_planet(myPlanet).get_initial_units()) if (unit.get_team() == enemyTeam){
+        MapLocation loc = unit.get_map_location();
+        if (reachEnemyFloodFillResult[loc.get_y()][loc.get_x()]==1){
+            doReachSomeEnemy = true;
+        } else{
+            doMissSomeEnemy = true;
+        }
+    }
+    if (doReachSomeEnemy and !doMissSomeEnemy) return FULLY_REACH_ENEMY;
+    if (doReachSomeEnemy) return PARTIALLY_REACH_ENEMY;
+    return CANT_REACH_ENEMY;
+}
+    
 static bool doReplicate(Unit& unit) {
 	// try to replicate next to currently building factory
 	shuffleDirOrder();
