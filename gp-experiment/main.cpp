@@ -7,6 +7,7 @@
 #include <functional>
 
 #include <utility>
+#include <set>
 #include <map>
 #include <vector>
 #include <queue>
@@ -29,6 +30,9 @@ static int roundNum;
 static bool raceToMars = false;
 
 static int maxConcurrentRocketsReady = 2;
+
+static int connectedComponent[55][55]; // connected component id of each cell
+static int whichConnectedComponent[65536]; // connected component id of each unit
 
 static int dis[55][55][55][55];
 static bool hasFriendlyWorker[55][55];
@@ -85,6 +89,12 @@ static int bfsDirectionIndexTo[55][55];
 static MapLocation bfsClosestKarbonite;
 static MapLocation bfsClosestEnemy;
 static MapLocation bfsClosestFreeGoodPosition;
+
+// battalion assignments
+static map<int, int> battalionId;
+static set<int> battalionLeaders;
+static int battalionSizes[65536];
+static MapLocation battalionDestinations[65536];
 
 // to random shuffle the directions
 static int randDirOrder[55];
@@ -204,6 +214,9 @@ static void runRanger (Unit& unit);
 static void runKnight(Unit& unit);
 static void runFactory (Unit& unit);
 
+static void computeBattalionSizes();
+static void runBattalions(vector<Unit>& myUnits);
+
 static void calculateManhattanDistancesToClosestEnemies(vector<Unit>& allUnits);
 static void doMoveRobot (Unit& unit, Direction dir);
 static void shuffleDirOrder();
@@ -216,6 +229,7 @@ static bool isFriendlyStructure(Unit unit);
 static bool isNextToBuildingBlueprint(MapLocation loc);
 static bool moveToAttackLocs (Unit& unit);
 
+static MapLocation getRandomMapLocation(Planet p, const MapLocation &giveUp);
 static void moveToTendency(Unit& unit);
 static int getRangerAttackPriority(Unit& unit);
 static bool rangerTryToAttack(Unit& unit);
@@ -224,7 +238,8 @@ static void multisourceBfsAvoidingUnitsAndDanger (vector<SimpleState>& startingL
 static bool doReplicate(Unit& unit);
 static void checkForEnemyUnits (vector<Unit>& allUnits);
 
-static void do_flood_fill(vector<SimpleState>& startingLocs, int resultArr[55][55], bool passableArr[55][55], int label);
+template<typename T>
+static void do_flood_fill(vector<SimpleState>& startingLocs, T resultArr[55][55], bool passableArr[55][55], T label);
 static int can_reach_enemy_on_earth();
 
 static bool bfsTowardsBlueprint(Unit& unit);
@@ -246,6 +261,18 @@ static inline int distance_squared(int dy, int dx) {
 	return dy * dy + dx * dx;
 }
 
+// some units should move before others to avoid getting in the way (for Mars Battalions)
+class compareUnitMovementOrdering {
+	public:
+		static int referenceY, referenceX;
+		bool operator() (const Unit &a, const Unit &b) {
+			return dis[referenceY][referenceX][a.get_map_location().get_y()][a.get_map_location().get_x()] > dis[referenceY][referenceX][b.get_map_location().get_y()][b.get_map_location().get_x()];
+		}
+};
+// initialise so that the compiler doesn't vomit out a wall of text
+int compareUnitMovementOrdering::referenceY = 0;
+int compareUnitMovementOrdering::referenceX = 0;
+
 // Store this list of all our units ourselves, so that we can add to it when we create units and use those new units
 // immediately.
 static vector<Unit> allMyUnitsVector;
@@ -253,7 +280,7 @@ static vector<Unit> allMyUnitsVector;
 // the index in allMyUnitsVector of the unit.
 static priority_queue<std::pair<int, int>> allMyUnitsPriorityQueue;
 
-static void add_unit_to_all_my_units(const Unit &unit) {
+static void add_unit_to_all_my_units (const Unit &unit) {
 	allMyUnitsVector.push_back(unit);
 	allMyUnitsPriorityQueue.emplace(-get_unit_order_priority(unit), int(allMyUnitsVector.size() - 1));
 }
@@ -329,6 +356,15 @@ int main() {
 
 			vector<Unit> units = gc.get_my_units();
 			init_turn(units);
+
+			// if there are good ranger positions or if there are attackLocs
+			// we should go into battle
+			// otherwise, there isnt much for us to do
+			if (good_ranger_positions.empty() && attackLocs.empty()) {
+				// we are alone on this barren land
+				// patrol in battalions
+				runBattalions(units);
+			}
 
 			while (!allMyUnitsPriorityQueue.empty()) {
 				Unit unit = allMyUnitsVector[allMyUnitsPriorityQueue.top().second];
@@ -423,7 +459,7 @@ int main() {
 				start_racing_to_mars();
 			}
 			clock_t after_init_turn = clock();
-			
+
 			printf("  pre-turn setup took %6d microseconds\n", get_microseconds(before_init_turn, after_init_turn));
 
 			clock_t before_units = clock();
@@ -450,47 +486,47 @@ int main() {
 
 				switch (unit.get_unit_type()) {
 					case Worker:
-					{
-						clock_t before = clock();
-						runEarthWorker(unit);
-						clock_t after = clock();
-						worker_stats.add(get_microseconds(before, after));
-					}
+						{
+							clock_t before = clock();
+							runEarthWorker(unit);
+							clock_t after = clock();
+							worker_stats.add(get_microseconds(before, after));
+						}
 						break;
 					case Factory:
-					{
-						clock_t before = clock();
-						runFactory(unit);
-						clock_t after = clock();
-						factory_stats.add(get_microseconds(before, after));
-					}
+						{
+							clock_t before = clock();
+							runFactory(unit);
+							clock_t after = clock();
+							factory_stats.add(get_microseconds(before, after));
+						}
 						break;
 					case Ranger:
-					{
-						clock_t before = clock();
-						runRanger(unit);
-						clock_t after = clock();
-						ranger_stats.add(get_microseconds(before, after));
-					}
+						{
+							clock_t before = clock();
+							runRanger(unit);
+							clock_t after = clock();
+							ranger_stats.add(get_microseconds(before, after));
+						}
 						break;
 					case Knight:
 						runKnight(unit);
 						break;
 					case Healer:
-					{
-						clock_t before = clock();
-						runHealer(unit);
-						clock_t after = clock();
-						healer_stats.add(get_microseconds(before, after));
-					}
+						{
+							clock_t before = clock();
+							runHealer(unit);
+							clock_t after = clock();
+							healer_stats.add(get_microseconds(before, after));
+						}
 						break;
 					case Rocket:
-					{
-						clock_t before = clock();
-						runEarthRocket(unit);
-						clock_t after = clock();
-						rocket_stats.add(get_microseconds(before, after));
-					}
+						{
+							clock_t before = clock();
+							runEarthRocket(unit);
+							clock_t after = clock();
+							rocket_stats.add(get_microseconds(before, after));
+						}
 						break;
 					case Mage:
 						break;
@@ -544,6 +580,9 @@ static void init_turn (vector<Unit>& myUnits) {
 			if (unit.structure_is_built() == 0) {
 				rocketsBeingBuilt.push_back(unit);
 			}
+		}
+		if (unit.is_on_map()) {
+			whichConnectedComponent[unit.get_id()] = connectedComponent[unit.get_map_location().get_y()][unit.get_map_location().get_x()];
 		}
 	}
 
@@ -805,6 +844,14 @@ static void init_global_variables () {
 	all_pairs_shortest_path();
 
 	is_very_early_game = true;
+
+	int num_connected_components = 0;
+	fo(y, 0, height) fo(x, 0, width) if (isPassable[y][x] && connectedComponent[y][x] == 0) {
+		vector<SimpleState> myLoc;
+		myLoc.push_back(SimpleState(y, x));
+		num_connected_components++;
+		do_flood_fill(myLoc, connectedComponent, isPassable, num_connected_components);
+	}
 }
 
 int get_unit_order_priority (const Unit& unit) {
@@ -1832,22 +1879,16 @@ static void tryToLoadRocket (Unit& unit) {
 
 			remove_type_from_friendly_unit_count(loadableUnits[i].get_unit_type());
 			gc.load(unit.get_id(), loadableUnits[i].get_id());
-
-			// @JERRY : I don't know what this does
-			// loadedUnits.add(unit.get_id());
 		}
 	}
 }
 
-static void do_flood_fill (vector<SimpleState>& startingLocs, bool resultArr[55][55], bool passableArr[55][55]) {
-
-	fo(y, 0, height) fo(x, 0, width) {
-		resultArr[y][x] = false;
-	}
+template<typename T>
+static void do_flood_fill (vector<SimpleState>& startingLocs, T resultArr[55][55], bool passableArr[55][55], T label) {
 
 	queue<SimpleState> q;
 	for (SimpleState loc: startingLocs){
-		resultArr[loc.y][loc.x] = true;
+		resultArr[loc.y][loc.x] = label;
 		q.push(loc);
 	}
 
@@ -1858,7 +1899,7 @@ static void do_flood_fill (vector<SimpleState>& startingLocs, bool resultArr[55]
 			int ny = cur.y + dy[d];
 			int nx = cur.x + dx[d];
 			if (0 <= ny && ny < height && 0 <= nx && nx < width && passableArr[ny][nx] && !resultArr[ny][nx]) {
-				resultArr[ny][nx] = true;
+				resultArr[ny][nx] = label;
 
 				q.push(SimpleState(ny,nx));
 			}
@@ -1881,7 +1922,10 @@ static int can_reach_enemy_on_earth () {
 		}
 	}
 
-	do_flood_fill(spawn_locs, can_reach_from_spawn, isPassable);
+	fo(y, 0, height) fo(x, 0, width) {
+		can_reach_from_spawn[y][x] = false;
+	}
+	do_flood_fill(spawn_locs, can_reach_from_spawn, isPassable, true);
 
 	bool doReachSomeEnemy = false;
 	bool doMissSomeEnemy = false;
@@ -2482,4 +2526,187 @@ static void doKarboniteMovement(Unit &unit, bool &doneMovement) {
 			}
 		}
 	}
+}
+
+static void computeBattalionSizes() {
+	// reset relevant data
+	for (set<int>::iterator it = battalionLeaders.begin(); it != battalionLeaders.end(); it++) {
+		battalionSizes[*it] = 0;
+	}
+	// check id of each unit
+	for (map<int, int>::iterator it = battalionId.begin(); it != battalionId.end(); it++) {
+		battalionSizes[it->second]++;
+	}
+}
+
+static void runBattalions(vector<Unit> &myUnits) {
+	// check if battalion leaders are alive
+	for (set<int>::iterator it = battalionLeaders.begin(); it != battalionLeaders.end();) {
+		if (!gc.can_sense_unit(*it)) {
+			it = battalionLeaders.erase(it);
+		} else {
+			it++;
+		}
+	}
+	// remove entries corresponding to dead robots
+	for (map<int, int>::iterator it = battalionId.begin(); it != battalionId.end();) {
+		if (!gc.can_sense_unit(it->first)) {
+			it = battalionId.erase(it);
+		} else {
+			it++;
+		}
+	}
+	// remove battalions that are too small
+	computeBattalionSizes();
+	// TODO experiment with the minimum size
+	const int minBattalionSize = 5;
+	for (set<int>::iterator it = battalionLeaders.begin(); it != battalionLeaders.end();) {
+		if (battalionSizes[*it] < minBattalionSize) {
+			it = battalionLeaders.erase(it);
+		} else {
+			it++;
+		}
+	}
+	// determine free-agents: units that arent in a battalion
+	vector<Unit> freeAgents;
+	int numFighters = 0;
+	for (size_t i = 0; i < myUnits.size(); i++) {
+		if (myUnits[i].is_on_map()) {
+			if (is_fighter_unit_type(myUnits[i].get_unit_type())) {
+				int unitId = myUnits[i].get_id();
+				map<int, int>::iterator it = battalionId.lower_bound(unitId);
+				if (it == battalionId.end() || it->first != unitId) {
+					// this unit is unassigned
+					freeAgents.push_back(myUnits[i]);
+				} else if (battalionLeaders.find(it->second) == battalionLeaders.end()) {
+					// this battalion was dissolved
+					freeAgents.push_back(myUnits[i]);
+				}
+				numFighters++;
+			}
+		}
+	}
+	// assign free-agents to battalions
+	computeBattalionSizes();
+	for (size_t i = 0; i < freeAgents.size(); i++) {
+		int bestBattalionId = -1, bestBattalionSize = 100000;
+		for (set<int>::iterator it = battalionLeaders.begin(); it != battalionLeaders.end(); it++) {
+			// condition: must be in the same connected component
+			// otherwise the battalion would be separated.. forever *cri*
+			// given a choice, take the one with the smallest size to give it more power
+			if (whichConnectedComponent[*it] == whichConnectedComponent[freeAgents[i].get_id()] && battalionSizes[*it] < bestBattalionSize) {
+				bestBattalionId = *it;
+				bestBattalionSize = battalionSizes[*it];
+			}
+		}
+		int unitId = freeAgents[i].get_id();
+		if (bestBattalionId == -1) {
+			// gg, got no option but to create a new one
+			battalionLeaders.insert(unitId);
+			battalionId[unitId] = unitId;
+			battalionSizes[unitId] = 1;
+			battalionDestinations[unitId] = getRandomMapLocation(Mars, freeAgents[i].get_map_location());
+		} else {
+			// assign to that one
+			battalionId[unitId] = bestBattalionId;
+			battalionSizes[bestBattalionId]++;
+		}
+	}
+	// split battalions that are too big if we have too few
+	// TODO experiment with this value
+	const int optimalBattalionQty = max(1, min(6, numFighters/8-1));
+	if (!battalionLeaders.empty()) {
+		while (battalionLeaders.size() < optimalBattalionQty) {
+			// take the largest one and split it in halves
+			int which = *battalionLeaders.begin();
+			for (set<int>::iterator it = battalionLeaders.begin(); it != battalionLeaders.end(); it++) {
+				if (battalionSizes[*it] > battalionSizes[which]) {
+					which = *it;
+				}
+			}
+			// get a list of the members of this battalion
+			vector<int> members;
+			for (map<int, int>::iterator it = battalionId.begin(); it != battalionId.end(); it++) {
+				if (it->second == which) {
+					members.push_back(it->first);
+				}
+			}
+			// calculate sizes of split portions
+			int portion1 = members.size() / 2;
+			int portion2 = members.size() - portion1;
+			// update stats
+			battalionLeaders.erase(which);
+			battalionLeaders.insert(members[0]);
+			battalionSizes[members[0]] = portion1;
+			// TODO remove this gc call TODO TODO TODO TODO TODO
+			battalionDestinations[members[0]] = getRandomMapLocation(Mars, gc.get_unit(members[0]).get_map_location());
+			battalionLeaders.insert(members[portion1]);
+			battalionSizes[members[portion1]] = portion2;
+			// TODO remove this gc call TODO TODO TODO TODO TODO
+			battalionDestinations[members[portion1]] = getRandomMapLocation(Mars, gc.get_unit(members[portion1]).get_map_location());
+			// assign
+			for (int i = 0; i < portion1; i++) {
+				battalionId[members[i]] = members[0];
+			}
+			for (int i = portion1; i < portion1+portion2; i++) {
+				battalionId[members[i]] = members[portion1];
+			}
+		}
+	}
+	// move the battalions around
+	for (set<int>::iterator it = battalionLeaders.begin(); it != battalionLeaders.end(); it++) {
+		int battalionLeader = *it;
+		// TODO: remove this gc call TODO TODO TODO TODO TODO
+		MapLocation locOfLeader = gc.get_unit(battalionLeader).get_map_location();
+		vector<int> members;
+		for (map<int, int>::iterator it2 = battalionId.begin(); it2 != battalionId.end(); it2++) {
+			if (it2->second == battalionLeader) {
+				members.push_back(it2->first);
+			}
+		}
+		// some robots may be scattered
+		// move towards leader if possible
+		// use pq to ensure units dont walk into each other
+		compareUnitMovementOrdering::referenceY = locOfLeader.get_y();
+		compareUnitMovementOrdering::referenceX = locOfLeader.get_x();
+		priority_queue<Unit, vector<Unit>, compareUnitMovementOrdering> movementPq;
+		for (size_t i = 0; i < members.size(); i++) {
+			// TODO: remove this gc call TODO TODO TODO TODO TODO
+			movementPq.push(gc.get_unit(members[i]));
+		}
+		while (!movementPq.empty()) {
+			Unit nextUnit = movementPq.top();
+			movementPq.pop();
+			tryMoveToLoc(nextUnit, dis[compareUnitMovementOrdering::referenceY][compareUnitMovementOrdering::referenceX]);
+		}
+		// now move together towards somewhere as a pack
+		// check our destination: if we are already there, get a new target
+		if (hasFriendlyUnit[battalionDestinations[battalionLeader].get_y()][battalionDestinations[battalionLeader].get_x()] ||
+				hasFriendlyStructure[battalionDestinations[battalionLeader].get_x()][battalionDestinations[battalionLeader].get_x()]) {
+			battalionDestinations[battalionLeader] = getRandomMapLocation(Mars, locOfLeader);
+		}
+		compareUnitMovementOrdering::referenceY = battalionDestinations[battalionLeader].get_y();
+		compareUnitMovementOrdering::referenceX = battalionDestinations[battalionLeader].get_x();
+		for (size_t i = 0; i < members.size(); i++) {
+			// TODO: remove this gc call TODO TODO TODO TODO TODO
+			movementPq.push(gc.get_unit(members[i]));
+		}
+		while (!movementPq.empty()) {
+			Unit nextUnit = movementPq.top();
+			movementPq.pop();
+			tryMoveToLoc(nextUnit, dis[compareUnitMovementOrdering::referenceY][compareUnitMovementOrdering::referenceX]);
+		}
+	}
+}
+
+static MapLocation getRandomMapLocation(Planet p, const MapLocation &giveUp) {
+	MapLocation result(p, rand()%width, rand()%height);
+	int num_retries = 10;
+	while (hasFriendlyUnit[result.get_y()][result.get_x()] || hasFriendlyStructure[result.get_y()][result.get_x()] || !isPassable[result.get_y()][result.get_x()]) {
+		result = MapLocation(p, rand()%width, rand()%height);
+		if (num_retries-- == 0) {
+			return giveUp;
+		}
+	}
+	return result;
 }
