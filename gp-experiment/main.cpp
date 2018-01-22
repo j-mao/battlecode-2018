@@ -422,136 +422,140 @@ int main() {
 		high_resolution_clock::time_point prev_point = high_resolution_clock::now();
 
 		while (true) {
-			printf("\n======================\nStarting round %d\n", roundNum);
-			int cur_time_left_ms = gc.get_time_left_ms();
-			clock_t cur_time = clock();
-			high_resolution_clock::time_point cur_point = high_resolution_clock::now();
-			static const int extra_time_per_round_ms = 25;
-			printf("time left (milliseconds): %d\n", cur_time_left_ms);
-			printf(" gc time             (milliseconds) used last round (with correction) = %6d\n", int(prev_time_left_ms - cur_time_left_ms) + extra_time_per_round_ms);
-			printf("  c time  (cpu time) (MICROseconds) used last round                   = %6d\n", get_microseconds(prev_time, cur_time));
-			std::cout << "c++ time (real time) (MICROseconds) used last round                   = " << std::setw(6) << (int)duration_cast<microseconds>(cur_point - prev_point).count() << std::endl;
-			printf("\n");
-			total_time += (int)duration_cast<milliseconds>(cur_point - prev_point).count();
-			printf("total time for the game so far (milliseconds) = %d\n", total_time);
-			prev_time_left_ms = cur_time_left_ms;
-			prev_time = cur_time;
-			prev_point = cur_point;
+			//printf("\n======================\nStarting round %d\n", roundNum);
+			if (gc.get_time_left_ms() < 300) {
+				printf("Warning: Running out of time! Skipping turn! (Less than 300 ms left.)\n");
+			} else {
+				/*int cur_time_left_ms = gc.get_time_left_ms();
+				clock_t cur_time = clock();
+				high_resolution_clock::time_point cur_point = high_resolution_clock::now();
+				static const int extra_time_per_round_ms = 25;
+				printf("time left (milliseconds): %d\n", cur_time_left_ms);
+				printf(" gc time             (milliseconds) used last round (with correction) = %6d\n", int(prev_time_left_ms - cur_time_left_ms) + extra_time_per_round_ms);
+				printf("  c time  (cpu time) (MICROseconds) used last round                   = %6d\n", get_microseconds(prev_time, cur_time));
+				std::cout << "c++ time (real time) (MICROseconds) used last round                   = " << std::setw(6) << (int)duration_cast<microseconds>(cur_point - prev_point).count() << std::endl;
+				printf("\n");
+				total_time += (int)duration_cast<milliseconds>(cur_point - prev_point).count();
+				printf("total time for the game so far (milliseconds) = %d\n", total_time);
+				prev_time_left_ms = cur_time_left_ms;
+				prev_time = cur_time;
+				prev_point = cur_point;*/
 
-			TimeStats get_unit_stats("Getting units from allMyUnits");
-			TimeStats ranger_stats("Ranger");
-			TimeStats worker_stats("Worker");
-			TimeStats healer_stats("Healer");
-			TimeStats factory_stats("Factory");
-			TimeStats rocket_stats("Rocket");
-			// Stats section 2: clearing 
-			ranger_attack_stats.clear();
-			ranger_attack_sense_stats.clear();
-			gc_get_unit_stats.clear();
-			queue_pop_stats.clear();
+				TimeStats get_unit_stats("Getting units from allMyUnits");
+				TimeStats ranger_stats("Ranger");
+				TimeStats worker_stats("Worker");
+				TimeStats healer_stats("Healer");
+				TimeStats factory_stats("Factory");
+				TimeStats rocket_stats("Rocket");
+				// Stats section 2: clearing 
+				ranger_attack_stats.clear();
+				ranger_attack_sense_stats.clear();
+				gc_get_unit_stats.clear();
+				queue_pop_stats.clear();
 
-			clock_t before_init_turn = clock();
+				clock_t before_init_turn = clock();
 
-			vector<Unit> units = gc.get_my_units();
-			init_turn(units);
+				vector<Unit> units = gc.get_my_units();
+				init_turn(units);
 
-			if (roundNum >= 400) {
-				start_racing_to_mars();
+				if (roundNum >= 400) {
+					start_racing_to_mars();
+				}
+				clock_t after_init_turn = clock();
+
+				//printf("  pre-turn setup took %6d microseconds\n", get_microseconds(before_init_turn, after_init_turn));
+
+				clock_t before_units = clock();
+
+				while (!allMyUnitsPriorityQueue.empty()) {
+					clock_t before_getting_unit = clock();
+
+					clock_t before_queue_pop = clock();
+					Unit unit = allMyUnitsVector[allMyUnitsPriorityQueue.top().second];
+					allMyUnitsPriorityQueue.pop();
+					clock_t after_queue_pop = clock();
+					queue_pop_stats.add(get_microseconds(before_queue_pop, after_queue_pop));
+
+					if (!gc.can_sense_unit(unit.get_id())) {
+						continue;
+					}
+
+					if (!unit.is_on_map()) {
+						continue;
+					}
+
+					clock_t after_getting_unit = clock();
+					get_unit_stats.add(get_microseconds(before_getting_unit, after_getting_unit));
+
+					switch (unit.get_unit_type()) {
+						case Worker:
+							{
+								clock_t before = clock();
+								runEarthWorker(unit);
+								clock_t after = clock();
+								worker_stats.add(get_microseconds(before, after));
+							}
+							break;
+						case Factory:
+							{
+								clock_t before = clock();
+								runFactory(unit);
+								clock_t after = clock();
+								factory_stats.add(get_microseconds(before, after));
+							}
+							break;
+						case Ranger:
+							{
+								clock_t before = clock();
+								runRanger(unit);
+								clock_t after = clock();
+								ranger_stats.add(get_microseconds(before, after));
+							}
+							break;
+						case Knight:
+							runKnight(unit);
+							break;
+						case Healer:
+							{
+								clock_t before = clock();
+								runHealer(unit);
+								clock_t after = clock();
+								healer_stats.add(get_microseconds(before, after));
+							}
+							break;
+						case Rocket:
+							{
+								clock_t before = clock();
+								runEarthRocket(unit);
+								clock_t after = clock();
+								rocket_stats.add(get_microseconds(before, after));
+							}
+							break;
+						case Mage:
+							break;
+					}
+
+				}
+
+				clock_t after_units = clock();
+				//printf("processing units took %6d microseconds\n", get_microseconds(before_units, after_units));
+
+				// Stats section 3: printing
+				/*
+				get_unit_stats.print();
+				queue_pop_stats.print();
+				*/
+				/*ranger_stats.print();
+				healer_stats.print();
+				worker_stats.print();
+				factory_stats.print();
+				rocket_stats.print();
+				ranger_attack_stats.print();
+				ranger_attack_sense_stats.print();*/
+				//gc_get_unit_stats.print();
+
+				//printf("Number of idle rangers is %3d / %3d\n", numIdleRangers, numRangers);
 			}
-			clock_t after_init_turn = clock();
-
-			printf("  pre-turn setup took %6d microseconds\n", get_microseconds(before_init_turn, after_init_turn));
-
-			clock_t before_units = clock();
-
-			while (!allMyUnitsPriorityQueue.empty()) {
-				clock_t before_getting_unit = clock();
-
-				clock_t before_queue_pop = clock();
-				Unit unit = allMyUnitsVector[allMyUnitsPriorityQueue.top().second];
-				allMyUnitsPriorityQueue.pop();
-				clock_t after_queue_pop = clock();
-				queue_pop_stats.add(get_microseconds(before_queue_pop, after_queue_pop));
-
-				if (!gc.can_sense_unit(unit.get_id())) {
-					continue;
-				}
-
-				if (!unit.is_on_map()) {
-					continue;
-				}
-
-				clock_t after_getting_unit = clock();
-				get_unit_stats.add(get_microseconds(before_getting_unit, after_getting_unit));
-
-				switch (unit.get_unit_type()) {
-					case Worker:
-						{
-							clock_t before = clock();
-							runEarthWorker(unit);
-							clock_t after = clock();
-							worker_stats.add(get_microseconds(before, after));
-						}
-						break;
-					case Factory:
-						{
-							clock_t before = clock();
-							runFactory(unit);
-							clock_t after = clock();
-							factory_stats.add(get_microseconds(before, after));
-						}
-						break;
-					case Ranger:
-						{
-							clock_t before = clock();
-							runRanger(unit);
-							clock_t after = clock();
-							ranger_stats.add(get_microseconds(before, after));
-						}
-						break;
-					case Knight:
-						runKnight(unit);
-						break;
-					case Healer:
-						{
-							clock_t before = clock();
-							runHealer(unit);
-							clock_t after = clock();
-							healer_stats.add(get_microseconds(before, after));
-						}
-						break;
-					case Rocket:
-						{
-							clock_t before = clock();
-							runEarthRocket(unit);
-							clock_t after = clock();
-							rocket_stats.add(get_microseconds(before, after));
-						}
-						break;
-					case Mage:
-						break;
-				}
-
-			}
-
-			clock_t after_units = clock();
-			printf("processing units took %6d microseconds\n", get_microseconds(before_units, after_units));
-
-			// Stats section 3: printing
-			/*
-			get_unit_stats.print();
-			queue_pop_stats.print();
-			*/
-			ranger_stats.print();
-			healer_stats.print();
-			worker_stats.print();
-			factory_stats.print();
-			rocket_stats.print();
-			ranger_attack_stats.print();
-			ranger_attack_sense_stats.print();
-			//gc_get_unit_stats.print();
-
-			//printf("Number of idle rangers is %3d / %3d\n", numIdleRangers, numRangers);
 
 			fflush(stdout);
 			gc.next_turn();
