@@ -74,6 +74,8 @@ static int width, height;
 static bool isPassable[55][55];
 static bool hasFriendlyUnit[55][55];
 static bool hasFriendlyStructure[55][55];
+static bool hasEnemyUnit[55][55];
+static int enemyUnitId[55][55];
 
 // temporary seen array
 static bool bfs_seen[55][55];
@@ -240,6 +242,10 @@ static int shortRangeBfsToBestKarbonite(Unit &unit);
 static void doBlueprintMovement(Unit &unit, bool &doneMovement);
 static void doKarboniteMovement(Unit &unit, bool &doneMovement);
 
+static inline int distance_squared(int dy, int dx) {
+	return dy * dy + dx * dx;
+}
+
 class compareUnits {
 	public:
 		bool operator() (Unit a, Unit b) {
@@ -289,6 +295,7 @@ struct TimeStats {
 // Stats section 1: declarations (some of them)
 TimeStats ranger_attack_stats("Ranger Attacks");
 TimeStats ranger_attack_sense_stats("Ranger Attack sense_nearby_units()");
+TimeStats gc_get_unit_stats("Calls to gc.get_unit(unit_id)");
 
 int main() {
 	printf("Player C++ bot starting\n");
@@ -382,6 +389,7 @@ int main() {
 			clock_t cur_time = clock();
 			high_resolution_clock::time_point cur_point = high_resolution_clock::now();
 			static const int extra_time_per_round_ms = 25;
+			printf("time left (milliseconds): %d\n", cur_time_left_ms);
 			printf(" gc time             (milliseconds) used last round (with correction) = %6d\n", int(prev_time_left_ms - cur_time_left_ms) + extra_time_per_round_ms);
 			printf("  c time  (cpu time) (MICROseconds) used last round                   = %6d\n", get_microseconds(prev_time, cur_time));
 			std::cout << "c++ time (real time) (MICROseconds) used last round                   = " << std::setw(6) << (int)duration_cast<microseconds>(cur_point - prev_point).count() << std::endl;
@@ -401,6 +409,7 @@ int main() {
 			// Stats section 2: clearing 
 			ranger_attack_stats.clear();
 			ranger_attack_sense_stats.clear();
+			gc_get_unit_stats.clear();
 
 			clock_t before_init_turn = clock();
 
@@ -495,6 +504,7 @@ int main() {
 			rocket_stats.print();
 			ranger_attack_stats.print();
 			ranger_attack_sense_stats.print();
+			gc_get_unit_stats.print();
 
 			//printf("Number of idle rangers is %3d / %3d\n", numIdleRangers, numRangers);
 
@@ -534,6 +544,7 @@ static void init_turn (vector<Unit>& myUnits) {
 		for (int x = 0; x < width; x++) {
 			hasFriendlyUnit[y][x] = false;
 			hasFriendlyStructure[y][x] = false;
+			hasEnemyUnit[y][x] = false;
 			attackDistanceToEnemy[y][x] = 9999;
 			is_good_ranger_position[y][x] = false;
 			is_good_ranger_position_taken[y][x] = false;
@@ -621,20 +632,26 @@ static void init_turn (vector<Unit>& myUnits) {
 			// enemy team
 
 			// calculate closest distances to enemy fighter units
-			if (unit.get_location().is_on_map() && is_fighter_unit_type(unit.get_unit_type())) {
-				// we've seen an enemy, mark as not the very early game anymore
-				is_very_early_game = false;
-
+			if (unit.get_location().is_on_map()) {
 				MapLocation loc = unit.get_map_location();
 				int locY = loc.get_y(), locX = loc.get_x();
-				for (int y = locY - 10; y <= locY + 10; y++) {
-					if (y < 0 || height <= y) continue;
-					for (int x = locX - 10; x <= locX + 10; x++) {
-						if (x < 0 || width <= x) continue;
-						int myDist = (y-locY) * (y-locY) + (x-locX) * (x-locX);
-						attackDistanceToEnemy[y][x] = min(attackDistanceToEnemy[y][x], myDist);
-						if (myDist <= unit.get_attack_range()) {
-							numEnemiesThatCanAttackSquare[y][x]++;
+
+				hasEnemyUnit[locY][locX] = true;
+				enemyUnitId[locY][locX] = unit.get_id();
+
+				if (is_fighter_unit_type(unit.get_unit_type())) {
+					// we've seen an enemy, mark as not the very early game anymore
+					is_very_early_game = false;
+
+					for (int y = locY - 10; y <= locY + 10; y++) {
+						if (y < 0 || height <= y) continue;
+						for (int x = locX - 10; x <= locX + 10; x++) {
+							if (x < 0 || width <= x) continue;
+							int myDist = (y-locY) * (y-locY) + (x-locX) * (x-locX);
+							attackDistanceToEnemy[y][x] = min(attackDistanceToEnemy[y][x], myDist);
+							if (myDist <= unit.get_attack_range()) {
+								numEnemiesThatCanAttackSquare[y][x]++;
+							}
 						}
 					}
 				}
@@ -1357,6 +1374,12 @@ static void runRanger (Unit& unit) {
 		}
 	}
 
+	// update unit location
+	clock_t before_gc_get_unit = clock();
+	unit = gc.get_unit(unit.get_id());
+	clock_t after_gc_get_unit = clock();
+	gc_get_unit_stats.add(get_microseconds(before_gc_get_unit, after_gc_get_unit));
+
 	// try to attack before and after moving
 	if (!doneAttack) {
 		clock_t before_attack = clock();
@@ -1451,6 +1474,9 @@ static void runHealer (Unit& unit) {
 			doneMove = true;
 		}
 	}
+
+	// update unit location
+	unit = gc.get_unit(unit.get_id());
 
 	if (!doneHeal) {
 		tryToHeal(unit);
@@ -1638,13 +1664,29 @@ static int getRangerAttackPriority(Unit& unit){
 }
 
 // returns whether the unit attacked
+// Requriements: Make sure the Unit object is up to date!
+// I.e. you must call gc.get_unit() again if the ranger moves!
 static bool rangerTryToAttack(Unit& unit) {
 	if (unit.is_on_map() && gc.is_attack_ready(unit.get_id())) {
 		// this radius needs to be at least 1 square larger than the ranger's attack range
 		// because the ranger might move, but the ranger's unit.get_map_location() won't update unless we
 		// call again. So just query a larger area around the ranger's starting location.
+		MapLocation loc = unit.get_map_location();
 		clock_t before_sense = clock();
-		vector<Unit> units = gc.sense_nearby_units(unit.get_map_location(), 99);
+		//vector<Unit> units = gc.sense_nearby_units(unit.get_map_location(), 50);
+		vector<Unit> units;
+		// Warning: Constants being used. Need to change constants if the game spec changes
+		for (int y = std::max(0, loc.get_y() - 7); y <= std::min(height - 1, loc.get_y() + 7); y++) {
+			for (int x = std::max(0, loc.get_x() - 7); x <= std::min(width - 1, loc.get_x() + 7); x++) {
+				int dist = distance_squared(y - loc.get_y(), x - loc.get_x());
+				// Warning: More constants being used (minimum and maximum ranger attack range)
+				if (10 < dist && dist <= 50) {
+					if (hasEnemyUnit[y][x] && gc.can_sense_unit(enemyUnitId[y][x])) {
+						units.push_back(gc.get_unit(enemyUnitId[y][x]));
+					}
+				}
+			}
+		}
 		clock_t after_sense = clock();
 		ranger_attack_sense_stats.add(get_microseconds(before_sense, after_sense));
 		int whichToAttack = -1, whichToAttackHealth = 999, whichToAttackPriority = -1;
@@ -1670,11 +1712,12 @@ static bool rangerTryToAttack(Unit& unit) {
 }
 
 // returns whether the healer successfully healed
+// Requirements: The Unit object must have an up-to-date location.
+// Otherwise the healer won't heal even when it is able to
 static bool tryToHeal(Unit& unit) {
 	if (unit.is_on_map() && gc.is_heal_ready(unit.get_id())) {
-		// this radius needs to be larger than the healer's heal range in case the healer moves
-		// (because the Unit object is cached and the location() won't update)
-		vector<Unit> units = gc.sense_nearby_units_by_team(unit.get_map_location(), 80, gc.get_team());
+		// Warning: Constant being used (healer heal range)
+		vector<Unit> units = gc.sense_nearby_units_by_team(unit.get_map_location(), 30, gc.get_team());
 		int whichToHeal = -1, whichToHealHealthMissing = -1;
 		for (int i = 0; i < units.size(); i++) {
 			Unit other = units[i];
