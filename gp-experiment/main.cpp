@@ -538,8 +538,10 @@ int main() {
 			printf("processing units took %6d microseconds\n", get_microseconds(before_units, after_units));
 
 			// Stats section 3: printing
+			/*
 			get_unit_stats.print();
 			queue_pop_stats.print();
+			*/
 			ranger_stats.print();
 			healer_stats.print();
 			worker_stats.print();
@@ -547,7 +549,7 @@ int main() {
 			rocket_stats.print();
 			ranger_attack_stats.print();
 			ranger_attack_sense_stats.print();
-			gc_get_unit_stats.print();
+			//gc_get_unit_stats.print();
 
 			//printf("Number of idle rangers is %3d / %3d\n", numIdleRangers, numRangers);
 
@@ -964,9 +966,9 @@ static void doMoveRobot (Unit& unit, Direction dir) {
 			printf("Error: hasFriendlyUnit[][] is incorrect!");
 			return;
 		}
-		hasFriendlyUnit[loc.get_y()][loc.get_x()] = false;
-		loc.add(dir);
-		hasFriendlyUnit[loc.get_y()][loc.get_x()] = true;
+		/*hasFriendlyUnit[loc.get_y()][loc.get_x()] = false;
+		MapLocation next_loc = loc.add(dir);
+		hasFriendlyUnit[next_loc.get_y()][next_loc.get_x()] = true;*/
 		gc.move_robot(unit.get_id(), dir);
 	}
 }
@@ -1778,13 +1780,11 @@ static bool tryToHeal(Unit& unit) {
 		vector<Unit> units = gc.sense_nearby_units_by_team(unit.get_map_location(), 30, gc.get_team());
 		int whichToHeal = -1, whichToHealHealthMissing = -1;
 		for (int i = 0; i < units.size(); i++) {
-			Unit other = units[i];
-			if (gc.can_heal(unit.get_id(), other.get_id())) {
-				int healthMissing = (int)(other.get_max_health() - other.get_health());
-				if (whichToHeal == -1 || healthMissing > whichToHealHealthMissing) {
-					whichToHeal = i;
-					whichToHealHealthMissing = healthMissing;
-				}
+			const Unit &other = units[i];
+			int healthMissing = (int)(other.get_max_health() - other.get_health());
+			if ((whichToHeal == -1 || healthMissing > whichToHealHealthMissing) && gc.can_heal(unit.get_id(), other.get_id())) {
+				whichToHeal = i;
+				whichToHealHealthMissing = healthMissing;
 			}
 		}
 		if (whichToHeal != -1 && whichToHealHealthMissing > 0) {
