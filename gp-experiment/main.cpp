@@ -187,7 +187,7 @@ static PlanetMap MarsMap;
 
 static void init_global_variables ();
 static void all_pairs_shortest_path();
-int get_unit_order_priority (Unit& unit);
+int get_unit_order_priority (const Unit& unit);
 static void start_racing_to_mars ();
 static void init_turn (vector<Unit>& myUnits);
 static bool is_healable_unit_type(UnitType unitType);
@@ -246,16 +246,17 @@ static inline int distance_squared(int dy, int dx) {
 	return dy * dy + dx * dx;
 }
 
-class compareUnits {
-	public:
-		bool operator() (Unit a, Unit b) {
-			return get_unit_order_priority(a) > get_unit_order_priority(b);
-		}
-};
-
 // Store this list of all our units ourselves, so that we can add to it when we create units and use those new units
 // immediately.
-static priority_queue<Unit, vector<Unit>, compareUnits> allMyUnits;
+static vector<Unit> allMyUnitsVector;
+// Priority queue of all my units. Each pair contains the weight which is negative get_unit_order_priority(unit), and
+// the index in allMyUnitsVector of the unit.
+static priority_queue<std::pair<int, int>> allMyUnitsPriorityQueue;
+
+static void add_unit_to_all_my_units(const Unit &unit) {
+	allMyUnitsVector.push_back(unit);
+	allMyUnitsPriorityQueue.emplace(-get_unit_order_priority(unit), int(allMyUnitsVector.size() - 1));
+}
 
 static int get_dir_index (Direction dir) {
 	fo(i, 0, 8) if (directions[i] == dir) {
@@ -296,6 +297,7 @@ struct TimeStats {
 TimeStats ranger_attack_stats("Ranger Attacks");
 TimeStats ranger_attack_sense_stats("Ranger Attack sense_nearby_units()");
 TimeStats gc_get_unit_stats("Calls to gc.get_unit(unit_id)");
+TimeStats queue_pop_stats("Getting elements from allMyUnits priority queue");
 
 int main() {
 	printf("Player C++ bot starting\n");
@@ -328,9 +330,9 @@ int main() {
 			vector<Unit> units = gc.get_my_units();
 			init_turn(units);
 
-			while (!allMyUnits.empty()) {
-				Unit unit = allMyUnits.top();
-				allMyUnits.pop();
+			while (!allMyUnitsPriorityQueue.empty()) {
+				Unit unit = allMyUnitsVector[allMyUnitsPriorityQueue.top().second];
+				allMyUnitsPriorityQueue.pop();
 
 				if (!gc.can_sense_unit(unit.get_id())) {
 					continue;
@@ -410,6 +412,7 @@ int main() {
 			ranger_attack_stats.clear();
 			ranger_attack_sense_stats.clear();
 			gc_get_unit_stats.clear();
+			queue_pop_stats.clear();
 
 			clock_t before_init_turn = clock();
 
@@ -425,11 +428,14 @@ int main() {
 
 			clock_t before_units = clock();
 
-			while (!allMyUnits.empty()) {
+			while (!allMyUnitsPriorityQueue.empty()) {
 				clock_t before_getting_unit = clock();
 
-				Unit unit = allMyUnits.top();
-				allMyUnits.pop();
+				clock_t before_queue_pop = clock();
+				Unit unit = allMyUnitsVector[allMyUnitsPriorityQueue.top().second];
+				allMyUnitsPriorityQueue.pop();
+				clock_t after_queue_pop = clock();
+				queue_pop_stats.add(get_microseconds(before_queue_pop, after_queue_pop));
 
 				if (!gc.can_sense_unit(unit.get_id())) {
 					continue;
@@ -497,6 +503,7 @@ int main() {
 
 			// Stats section 3: printing
 			get_unit_stats.print();
+			queue_pop_stats.print();
 			ranger_stats.print();
 			healer_stats.print();
 			worker_stats.print();
@@ -701,11 +708,15 @@ static void init_turn (vector<Unit>& myUnits) {
 	}
 	//printf("Number of good ranger positions: %d\n", int(good_ranger_positions.size()));
 
-	while (!allMyUnits.empty()) {
-		allMyUnits.pop();
+	while (!allMyUnitsPriorityQueue.empty()) {
+		allMyUnitsPriorityQueue.pop();
 	}
+	allMyUnitsVector.clear();
 	for (int i = 0; i < myUnits.size(); i++) {
-		allMyUnits.push(myUnits[i]);
+		// TODO: make this faster?
+		// TODO: just set allMyUnitsVector = myUnits ?
+		// TODO: use std::move() or something? If only I knew how std::move actually worked.
+		add_unit_to_all_my_units(myUnits[i]);
 	}
 
 	calculateManhattanDistancesToClosestEnemies(units);
@@ -796,7 +807,7 @@ static void init_global_variables () {
 	is_very_early_game = true;
 }
 
-int get_unit_order_priority (Unit& unit) {
+int get_unit_order_priority (const Unit& unit) {
 	switch(unit.get_unit_type()) {
 		// Actually not sure whether fighting units or workers should go first... so just use the same priority...
 		case Ranger:
@@ -1116,7 +1127,7 @@ static void tryToUnload (Unit& unit) {
 			gc.unload(unit.get_id(), unloadDir);
 			MapLocation loc = unit.get_map_location().add(unloadDir);
 			hasFriendlyUnit[loc.get_y()][loc.get_x()] = true;
-			allMyUnits.push(gc.sense_unit_at_location(loc));
+			add_unit_to_all_my_units(gc.sense_unit_at_location(loc));
 			// TODO: check everywhere else to make sure hasFriendlyUnits[][] is being correctly maintained.
 		}
 	}
@@ -1995,7 +2006,7 @@ static bool doReplicate(Unit& unit) {
 	if (replicateDir != Center) {
 		gc.replicate(unit.get_id(), replicateDir);
 		MapLocation loc = unit.get_map_location().add(replicateDir);
-		allMyUnits.push(gc.sense_unit_at_location(loc));
+		add_unit_to_all_my_units(gc.sense_unit_at_location(loc));
 		hasFriendlyUnit[loc.get_y()][loc.get_x()] = true;
 		numWorkers++;
 		return true;
