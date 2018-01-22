@@ -83,6 +83,7 @@ LICENSE
 *.bat
 **/run.sh
 /run_nodocker.sh
+/battlecode
 /battlecode.sh
 /battlecode-engine
 /battlecode-manager
@@ -93,6 +94,9 @@ LICENSE
 Cargo.*
 Makefile
 helpers.mk
+install_viewer.py
+viewer_currentInstall.json
+/viewer_latest
 
 # Example funcs players
 examplefuncsplayer-c
