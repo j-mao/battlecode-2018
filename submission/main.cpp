@@ -1138,13 +1138,24 @@ static void runEarthWorker (Unit& unit) {
 
 	if (!doneAction) {
 		// if next to karbonite, mine
+		int best = -1, best_karbonite_amount = -1;
 		for (int i = 0; i < 9; i++) {
+			// This gc call has to be in the outer if statement because we don't check for out of bounds locations in the
+			// inner if statement. (This is, we rely on can_harvest() to do the oob check for us.)
 			if (gc.can_harvest(unit.get_id(), directions[i])) {
-				//System.out.println("harvesting!");
-				gc.harvest(unit.get_id(), directions[i]);
-				doneAction = true;
-				break;
+				MapLocation loc = unit.get_map_location().add(directions[i]);
+				if (best == -1 || lastKnownKarboniteAmount[loc.get_y()][loc.get_x()] > best_karbonite_amount) {
+					best = i;
+					best_karbonite_amount = lastKnownKarboniteAmount[loc.get_y()][loc.get_x()];
+				}
 			}
+		}
+		if (best != -1) {
+			//System.out.println("harvesting!");
+			gc.harvest(unit.get_id(), directions[best]);
+			MapLocation loc = unit.get_map_location().add(directions[best]);
+			lastKnownKarboniteAmount[loc.get_y()][loc.get_x()] = gc.get_karbonite_at(loc);
+			doneAction = true;
 		}
 	}
 	if (!doneAction) {
