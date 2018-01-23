@@ -172,6 +172,11 @@ static int numIdleMages;
 
 static bool is_attack_round;
 
+// an array 0..8
+// the array index is the degree of the location: how many units you can unload simultaneously
+// we prioritise the best, of course
+static vector<MapLocation> goodRocketLandingLocations[9];
+
 // whether it's "very early game"
 // during the very early game we want our replicating workers to explore as fast as possible
 // currently defined as true until you see an enemy fighting unit, or you reach a square where
@@ -458,15 +463,15 @@ int main() {
 		gc.queue_research(Worker);
 		gc.queue_research(Ranger);
 		gc.queue_research(Healer);
-		gc.queue_research(Rocket);
+		gc.queue_research(Rocket); // get on mars early
 		gc.queue_research(Mage);
 		gc.queue_research(Mage);
 		gc.queue_research(Mage);
-		gc.queue_research(Mage);
-		gc.queue_research(Ranger);
+		gc.queue_research(Mage);   // blink mages
 		gc.queue_research(Healer);
-		gc.queue_research(Healer);
+		gc.queue_research(Healer); // overcharge
 		gc.queue_research(Ranger);
+		gc.queue_research(Ranger); // snipe
 		gc.queue_research(Worker);
 
 		int total_time = 0;
@@ -950,6 +955,22 @@ static void init_global_variables () {
 		num_connected_components++;
 		do_flood_fill(myLoc, connectedComponent, isPassable, num_connected_components);
 	}
+
+	for (int y = 0; y < MarsMap.get_height(); y++) for (int x = 0; x < MarsMap.get_width(); x++) {
+		MapLocation loc(Mars, y, x);
+		if (MarsMap.is_passable_terrain_at(loc)) {
+			int degree = 0;
+			for (int i = 0; i < 8; i++) {
+				MapLocation neighbour(loc.add(directions[i]));
+				if (MarsMap.is_on_map(neighbour)) {
+					if (MarsMap.is_passable_terrain_at(loc)) {
+						degree++;
+					}
+				}
+			}
+			goodRocketLandingLocations[degree].push_back(loc);
+		}
+	}
 }
 
 int get_unit_order_priority (const Unit& unit) {
@@ -1211,13 +1232,24 @@ static void runEarthWorker (Unit& unit) {
 
 	if (!doneAction) {
 		// if next to karbonite, mine
+		int best = -1, best_karbonite_amount = -1;
 		for (int i = 0; i < 9; i++) {
+			// This gc call has to be in the outer if statement because we don't check for out of bounds locations in the
+			// inner if statement. (This is, we rely on can_harvest() to do the oob check for us.)
 			if (gc.can_harvest(unit.get_id(), directions[i])) {
-				//System.out.println("harvesting!");
-				gc.harvest(unit.get_id(), directions[i]);
-				doneAction = true;
-				break;
+				MapLocation loc = unit.get_map_location().add(directions[i]);
+				if (best == -1 || lastKnownKarboniteAmount[loc.get_y()][loc.get_x()] > best_karbonite_amount) {
+					best = i;
+					best_karbonite_amount = lastKnownKarboniteAmount[loc.get_y()][loc.get_x()];
+				}
 			}
+		}
+		if (best != -1) {
+			//printf("harvesting!\n");
+			gc.harvest(unit.get_id(), directions[best]);
+			MapLocation loc = unit.get_map_location().add(directions[best]);
+			lastKnownKarboniteAmount[loc.get_y()][loc.get_x()] = gc.get_karbonite_at(loc);
+			doneAction = true;
 		}
 	}
 	if (!doneAction) {
@@ -1314,12 +1346,21 @@ static void runEarthRocket (Unit& unit) {
 	// DEBUG_OUTPUT("I am a rocket and I think it isn't worth waiting: %d, full? %d\n", notWorthWaiting ? 1 : 0, fullRocket ? 1 : 0);
 
 	if (dangerOfDestruction || aboutToFlood || (fullRocket && notWorthWaiting)) {
-		MapLocation where;
-		do {
-			int landX = (int)(rand() % MarsMap.get_width());
-			int landY = (int)(rand() % MarsMap.get_height());
-			where = MapLocation(Mars, landX, landY);
-		} while (MarsMap.is_passable_terrain_at(where) == 0);
+		MapLocation where = nullMapLocation;
+		for (int i = 8; i > 0; i--) {
+			if (goodRocketLandingLocations[i].size() > 0) {
+				where = goodRocketLandingLocations[i].back();
+				goodRocketLandingLocations[i].pop_back();
+				break;
+			}
+		}
+		if (where == nullMapLocation) {
+			do {
+				int landX = (int)(rand() % MarsMap.get_width());
+				int landY = (int)(rand() % MarsMap.get_height());
+				where = MapLocation(Mars, landX, landY);
+			} while (MarsMap.is_passable_terrain_at(where) == 0);
+		}
 
 		gc.launch_rocket(unit.get_id(), where);
 	}
