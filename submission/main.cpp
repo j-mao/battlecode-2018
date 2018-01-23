@@ -156,11 +156,16 @@ static int distToEnemyStartingLocs[55][55];
 
 static int numIdleRangers;
 
+static bool is_attack_round;
+
 // whether it's "very early game"
 // during the very early game we want our replicating workers to explore as fast as possible
 // currently defined as true until you see an enemy fighting unit, or you reach a square where
 // distance to enemy starting locs <= distance to friendly starting locs
 static bool is_very_early_game;
+
+// TODO: generalise this to all research types. Like... current_x_research_level or something idk.
+static bool has_overcharge_researched;
 
 static const int MultisourceBfsUnreachableMax = 499;
 static bool can_reach_from_spawn[55][55];
@@ -233,7 +238,7 @@ static MapLocation getRandomMapLocation(Planet p, const MapLocation &giveUp);
 static void moveToTendency(Unit& unit);
 static int getRangerAttackPriority(Unit& unit);
 static bool rangerTryToAttack(Unit& unit);
-static bool tryToHeal(Unit& unit);
+static void tryToHealAndOvercharge(Unit& unit);
 static void multisourceBfsAvoidingUnitsAndDanger (vector<SimpleState>& startingLocs, int resultArr[55][55]);
 static bool doReplicate(Unit& unit);
 static void checkForEnemyUnits (vector<Unit>& allUnits);
@@ -408,12 +413,25 @@ int main() {
 		}
 	} else {
 		gc.queue_research(Worker);
+
 		gc.queue_research(Ranger);
+
 		gc.queue_research(Healer);
+		gc.queue_research(Healer);
+		gc.queue_research(Healer);
+
 		gc.queue_research(Ranger);
-		gc.queue_research(Healer);
+
+		gc.queue_research(Worker);
+		gc.queue_research(Worker);
+
 		gc.queue_research(Rocket);
+
+		gc.queue_research(Worker);
+
 		gc.queue_research(Rocket);
+		// Currently this last rocket upgrade is useless because we get it on round 750 xd.
+		// But whatever 4Head.
 		gc.queue_research(Rocket);
 
 		int total_time = 0;
@@ -613,6 +631,20 @@ static void init_turn (vector<Unit>& myUnits) {
 			}
 		}
 	}
+
+	// Is attack round
+	// In these rounds, rangers move forward and attack, and healers will overcharge
+	// TODO: change this (gp)
+	// TODO: take into account current ranger upgrade level
+	// TODO: make it not as deterministic. Make it every 6/7 rounds without upgrades and 5/6 rounds with upgrades or something
+	is_attack_round = false;
+	if (roundNum % 5 == 0) {
+		is_attack_round = true;
+	}
+
+	// Research
+	ResearchInfo research_info = gc.get_research_info();
+	has_overcharge_researched = research_info.get_level(Healer) >= 3;
 
 	//reset unit counts
 	numWorkers = 0; numKnights = 0; numRangers = 0; numMages = 0; numHealers = 0; numFactories = 0; numRockets = 0;
@@ -874,6 +906,8 @@ int get_unit_order_priority (const Unit& unit) {
 				// give priority to units that are closer to enemies
 				// NOTE: the default value for manhattanDistanceToNearestEnemy (ie the value when there are no nearby
 				//   enemies) should be less than 998 so that priorities don't get mixed up!
+				// NOTE: since we're giving priority to units that are closer to enemies, the frontline rangers should
+				//   run before healers, so that healers can overcharge them. Idk hopefully it works out xd.
 				return 999 + manhattanDistanceToNearestEnemy[loc.get_y()][loc.get_x()];
 			} else {
 				return 1998;
@@ -1334,7 +1368,7 @@ static void runRanger (Unit& unit) {
 				}
 			} else {
 				// currently 1 move from being in range of enemy
-				if (!doneAttack && gc.is_attack_ready(unit.get_id()) && roundNum % 5 == 0) {
+				if (!doneAttack && gc.is_attack_ready(unit.get_id()) && is_attack_round) {
 					// move into a position where you can attack
 					int best = -1, bestNumEnemies = 999;
 					shuffleDirOrder();
@@ -1515,7 +1549,7 @@ static void runKnight(Unit& unit) {
 }
 
 static void runHealer (Unit& unit) {
-	bool doneHeal = tryToHeal(unit);
+	tryToHealAndOvercharge(unit);
 	bool doneMove = false;
 
 	if (raceToMars && !doneMove) {
@@ -1548,12 +1582,10 @@ static void runHealer (Unit& unit) {
 		}
 	}
 
-	// update unit location
+	// update unit location and cooldowns
 	unit = gc.get_unit(unit.get_id());
 
-	if (!doneHeal) {
-		tryToHeal(unit);
-	}
+	tryToHealAndOvercharge(unit);
 }
 
 static bool tryToMoveToRocket (Unit& unit ) {
@@ -1785,28 +1817,63 @@ static bool rangerTryToAttack(Unit& unit) {
 }
 
 // returns whether the healer successfully healed
-// Requirements: The Unit object must have an up-to-date location.
+// Requirements: The Unit object must have an up-to-date location and cooldowns.
 // Otherwise the healer won't heal even when it is able to
-static bool tryToHeal(Unit& unit) {
-	if (unit.is_on_map() && gc.is_heal_ready(unit.get_id())) {
+// And the healer might incorrectly try to heal/overcharge, or waste time limit trying to when it can't
+static void tryToHealAndOvercharge(Unit& unit) {
+	bool is_heal_ready = gc.is_heal_ready(unit.get_id());
+	// Only overcharges if the current round is an attack round
+	bool is_overcharge_ready =
+		has_overcharge_researched &&
+		unit.get_ability_heat() < 10 &&
+		is_attack_round;
+	if (unit.is_on_map() && (is_heal_ready || is_overcharge_ready)) {
 		// Warning: Constant being used (healer heal range)
+		// Warning: Constant being used (healer overcharge range)
+		// Currently heal range and overcharge range are the same. Need to change this if they change.
 		vector<Unit> units = gc.sense_nearby_units_by_team(unit.get_map_location(), 30, gc.get_team());
 		int whichToHeal = -1, whichToHealHealthMissing = -1;
+		int whichToOvercharge = -1, whichToOverchargeAttackHeat = -1;
 		for (int i = 0; i < units.size(); i++) {
 			const Unit &other = units[i];
+			// heal the unit with most health missing
 			int healthMissing = (int)(other.get_max_health() - other.get_health());
-			if ((whichToHeal == -1 || healthMissing > whichToHealHealthMissing) && gc.can_heal(unit.get_id(), other.get_id())) {
+			if (is_heal_ready && (whichToHeal == -1 || healthMissing > whichToHealHealthMissing) && gc.can_heal(unit.get_id(), other.get_id())) {
 				whichToHeal = i;
 				whichToHealHealthMissing = healthMissing;
+			}
+			// overcharge a ranger within attack range of the enemy, and with the most attack heat
+			// if there's no ranger within attack range of the enemy, don't waste your overcharge! Just wait.
+			// TODO: add overcharging other units, e.g. mages
+			if (is_overcharge_ready) {
+				// Warning: constant being used (ranger attack range)
+				// TODO: does this crash if there are units in a garrison? Does sense unit get those units?
+				MapLocation other_loc = other.get_map_location();
+				if (other.get_unit_type() == Ranger && attackDistanceToEnemy[other_loc.get_y()][other_loc.get_x()] <= 50) {
+					if (whichToOvercharge == -1 || other.get_attack_heat() > whichToOverchargeAttackHeat) {
+						whichToOvercharge = i;
+						whichToOverchargeAttackHeat = other.get_attack_heat();
+					}
+				}
 			}
 		}
 		if (whichToHeal != -1 && whichToHealHealthMissing > 0) {
 			//System.out.println("Healer says: 'I'm being useful!'");
 			gc.heal(unit.get_id(), units[whichToHeal].get_id());
-			return true;
+		}
+		if (whichToOvercharge != -1 && whichToOverchargeAttackHeat >= 10) {
+			Unit other = units[whichToOvercharge];
+			if (other.is_on_map()) {
+				/*printf("healer at %d %d overcharging unit at %d %d\n", unit.get_map_location().get_x(), unit.get_map_location().get_y(),
+					other.get_map_location().get_x(), other.get_map_location().get_y());*/
+				gc.overcharge(unit.get_id(), other.get_id());
+				add_unit_to_all_my_units(other);
+			} else {
+				printf("Error: Expected to be able to overcharge unit, but can't. "
+					"Probably because sense_nearby_units_by_team() returned a unit in a garrison.\n");
+			}
 		}
 	}
-	return false;
 }
 
 static void checkForEnemyUnits (vector<Unit>& allUnits) {
