@@ -2240,6 +2240,11 @@ static bool mageTryToAttack(Unit& unit) {
 							}
 							attackPriority += mageAttackPriorities[y][x];
 						}
+						if (y == loc.get_y() && x == loc.get_x()) {
+							// dont shoot yourself
+							kills = -420420;
+							attackPriority = -420420;
+						}
 					}
 				}
 
