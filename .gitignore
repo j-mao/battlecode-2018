@@ -82,6 +82,7 @@ tags
 LICENSE
 *.bat
 **/run.sh
+**/prepare.sh
 /run_nodocker.sh
 /battlecode
 /battlecode.sh
