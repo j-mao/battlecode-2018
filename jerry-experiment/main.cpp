@@ -963,13 +963,17 @@ static void init_global_variables () {
 			for (int i = 0; i < 8; i++) {
 				MapLocation neighbour(loc.add(directions[i]));
 				if (MarsMap.is_on_map(neighbour)) {
-					if (MarsMap.is_passable_terrain_at(loc)) {
+					if (MarsMap.is_passable_terrain_at(neighbour)) {
 						degree++;
 					}
 				}
 			}
-			goodRocketLandingLocations[degree].push_back(loc);
+			//goodRocketLandingLocations[degree].push_back(loc);
+			goodRocketLandingLocations[8].push_back(loc);
 		}
+	}
+	for (int i = 0;i <= 8;i++) {
+		random_shuffle(goodRocketLandingLocations[i].begin(), goodRocketLandingLocations[i].end());
 	}
 }
 

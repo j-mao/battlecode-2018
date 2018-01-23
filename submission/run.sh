@@ -8,7 +8,7 @@ INCLUDES="-I/battlecode-c/include"
 
 echo starting compilation
 
-g++ -std=c++14 -O3 main.cpp -o main $LIBRARIES $INCLUDES
+g++ -std=c++14 -O3 main.cpp -o main $LIBRARIES $INCLUDES -DNOT_IN_DEBUG_MODE
 
 echo compilation finished, starting bot
 
