@@ -15,6 +15,7 @@ x = impassable
 2 = 20k
 r = red_worker
 b = blue_worker
+9 = 90k
 
 > r_______________________________________
 > ________________________________________
@@ -28,9 +29,9 @@ b = blue_worker
 > ________________________________________
 > ________________________________________
 > ________________________________________
-> xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-> xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-> xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+> ________________________________________
+> ________________________________________
+> ________________________________________
 > xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 > xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 > xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
@@ -42,46 +43,46 @@ width: 40
 height: 40
 symmetry: none
 
-> 22222xxxxx22222xxxxx22222xxxxx22222xxxxx
-> 22222xxxxx22222xxxxx22222xxxxx22222xxxxx
-> 22222xxxxx22222xxxxx22222xxxxx22222xxxxx
-> 22222xxxxx22222xxxxx22222xxxxx22222xxxxx
-> 22222xxxxx22222xxxxx22222xxxxx22222xxxxx
-> xxxxx22222xxxxx22222xxxxx22222xxxxx22222
-> xxxxx22222xxxxx22222xxxxx22222xxxxx22222
-> xxxxx22222xxxxx22222xxxxx22222xxxxx22222
-> xxxxx22222xxxxx22222xxxxx22222xxxxx22222
-> xxxxx22222xxxxx22222xxxxx22222xxxxx22222
-> 22222xxxxx22222xxxxx22222xxxxx22222xxxxx
-> 22222xxxxx22222xxxxx22222xxxxx22222xxxxx
-> 22222xxxxx22222xxxxx22222xxxxx22222xxxxx
-> 22222xxxxx22222xxxxx22222xxxxx22222xxxxx
-> 22222xxxxx22222xxxxx22222xxxxx22222xxxxx
-> xxxxx22222xxxxx22222xxxxx22222xxxxx22222
-> xxxxx22222xxxxx22222xxxxx22222xxxxx22222
-> xxxxx22222xxxxx22222xxxxx22222xxxxx22222
-> xxxxx22222xxxxx22222xxxxx22222xxxxx22222
-> xxxxx22222xxxxx22222xxxxx22222xxxxx22222
-> 22222xxxxx22222xxxxx22222xxxxx22222xxxxx
-> 22222xxxxx22222xxxxx22222xxxxx22222xxxxx
-> 22222xxxxx22222xxxxx22222xxxxx22222xxxxx
-> 22222xxxxx22222xxxxx22222xxxxx22222xxxxx
-> 22222xxxxx22222xxxxx22222xxxxx22222xxxxx
-> xxxxx22222xxxxx22222xxxxx22222xxxxx22222
-> xxxxx22222xxxxx22222xxxxx22222xxxxx22222
-> xxxxx22222xxxxx22222xxxxx22222xxxxx22222
-> xxxxx22222xxxxx22222xxxxx22222xxxxx22222
-> xxxxx22222xxxxx22222xxxxx22222xxxxx22222
-> 22222xxxxx22222xxxxx22222xxxxx22222xxxxx
-> 22222xxxxx22222xxxxx22222xxxxx22222xxxxx
-> 22222xxxxx22222xxxxx22222xxxxx22222xxxxx
-> 22222xxxxx22222xxxxx22222xxxxx22222xxxxx
-> 22222xxxxx22222xxxxx22222xxxxx22222xxxxx
-> xxxxx22222xxxxx22222xxxxx22222xxxxx22222
-> xxxxx22222xxxxx22222xxxxx22222xxxxx22222
-> xxxxx22222xxxxx22222xxxxx22222xxxxx22222
-> xxxxx22222xxxxx22222xxxxx22222xxxxx22222
-> xxxxx22222xxxxx22222xxxxx22222xxxxx22222
+> 9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx
+> xx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9x
+> 9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx
+> xx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9x
+> 9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx
+> xx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9x
+> 9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx
+> xx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9x
+> 9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx
+> xx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9x
+> 9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx
+> xx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9x
+> 9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx
+> xx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9x
+> 9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx22222222
+> xx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9x22222222
+> 9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx22222222
+> xx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9x22222222
+> 9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx22222222
+> xx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9x22222222
+> 9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx22222222
+> xx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9x22222222
+> 9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx22222222
+> xx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9x22222222
+> 9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx22222222
+> xx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9x22222222
+> 9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx22222222
+> xx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9x
+> 9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx
+> xx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9x
+> 9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx
+> xx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9x
+> 9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx
+> xx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9x
+> 9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx
+> xx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9x
+> 9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx
+> xx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9x
+> 9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx
+> xx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9xxx9x
 
 #* 10 24 39 16
 #* 200 2 3 150
