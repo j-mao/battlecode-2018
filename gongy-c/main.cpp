@@ -3302,19 +3302,49 @@ static void match_units_to_rockets (vector<Unit>& input_units) {
 
 		sort(sorted_by_dist.begin(), sorted_by_dist.end());
 
+		int c_healer = -1;
+		int c_worker = -1;
+
 		fo(i, 0, SZ(sorted_by_dist)) {
+			if (!need_healer && !need_worker) {
+				break;
+			}
+
 			int id;
 			UnitType type;
 			tie(ignore, id, type) = sorted_by_dist[i];
 
-			num_needed--;
-			unit_summon[id] = make_pair(ry, rx);
-			if (type == Healer) need_healer = false;
-			if (type == Worker) need_worker = false;
+			if (need_healer && type == Healer) {
+				need_healer = false;
+				num_needed--;
+				c_healer = id;
+				unit_summon[id] = make_pair(ry, rx);
+			}
 
+			if (need_worker && type == Worker) {
+				need_worker = false;
+				num_needed--;
+				c_worker = id;
+				unit_summon[id] = make_pair(ry, rx);
+			}
+		}
+
+		fo(i, 0, SZ(sorted_by_dist)) {
 			if (num_needed == 0) {
 				break;
 			}
+
+			int id;
+			UnitType type;
+			tie(ignore, id, type) = sorted_by_dist[i];
+
+			if (id == c_healer || id == c_worker) {
+				// don't double count on yourself
+				continue;
+			}
+
+			num_needed--;
+			unit_summon[id] = make_pair(ry, rx);
 		}
 	}
 }
