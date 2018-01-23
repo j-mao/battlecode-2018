@@ -1010,7 +1010,10 @@ static void runEarthWorker (Unit& unit) {
 	// If it's early game and you're a currently replicating worker, prioritize karbonite over blueprints
 	// Otherwise prioritise blueprints over karbonite
 	// See declaration of is_very_early_game for how we define early game
-	if (is_very_early_game && unit.get_ability_heat() < 20) {
+	// Edit: added max round 50, because sometimes replicate would actually come off cooldown before the "very early game"
+	// actually finished, and then your building bots would bug out. Example map: secretgarden
+	// Warning: constant used (replicate cooldown in #rounds)
+	if (is_very_early_game && roundNum < 50 && unit.get_ability_heat() < 20) {
 		doKarboniteMovement(unit, doneMovement);
 		doBlueprintMovement(unit, doneMovement);
 	} else {
@@ -1071,6 +1074,12 @@ static void runEarthWorker (Unit& unit) {
 		}
 	}
 
+	// Build before blueprinting so that we don't lay down a bunch of blueprints while we haven't even finished one factory
+	if (doBuild(unit)) {
+		// try to build adjacent structures
+		doneAction = true;
+	}
+
 	// hard code not building factory on round 1 so that we can replicate
 	if (roundNum > 1 && !doneAction) {
 		// if you can blueprint factory/rocket and want to blueprint factory/rocket...
@@ -1093,10 +1102,6 @@ static void runEarthWorker (Unit& unit) {
 
 	}
 
-	if (doBuild(unit)) {
-		// try to build adjacent structures
-		doneAction = true;
-	}
 	if (!doneAction) {
 		// if next to karbonite, mine
 		for (int i = 0; i < 9; i++) {
@@ -1219,6 +1224,10 @@ static void runMarsRocket (Unit& unit) {
 }
 
 static void runFactory (Unit& unit) {
+	// Don't check whether the factory is built because it might be built this turn and the unit object would not be updated
+	// (i.e. if the factory is completed this turn then we might incorrectly skip this factory by checking structure_is_built()
+	//   so just lazily don't check it and it's fine xd)
+
 	UnitType unitTypeToBuild = Ranger;
 
 	MapLocation loc = unit.get_map_location();
@@ -1243,7 +1252,7 @@ static void runFactory (Unit& unit) {
 	}
 
 	if (gc.can_produce_robot(unit.get_id(), unitTypeToBuild)) {
-		//System.out.println("PRODUCING ROBOT!!!");
+		//printf("PRODUCING ROBOT!!!");
 		gc.produce_robot(unit.get_id(), unitTypeToBuild);
 		// make sure to immediately update unit counts
 		add_type_to_friendly_unit_count(unitTypeToBuild);
@@ -2133,6 +2142,7 @@ static bool doBlueprint (Unit& unit, UnitType toBlueprint) {
 
 static bool doBuild(Unit& unit) {
 	vector<Unit> units = gc.sense_nearby_units(unit.get_map_location(), 2);
+	int bestIndex = -1, bestHealthLeft = 99999;
 	fo(i, 0, SZ(units)) {
 		Unit& other = units[i];
 
@@ -2141,39 +2151,52 @@ static bool doBuild(Unit& unit) {
 			continue;
 		}
 
-		if (gc.can_build(unit.get_id(), other.get_id())) {
-			gc.build(unit.get_id(), other.get_id());
+		int healthLeft = other.get_max_health() - other.get_health();
+		if (bestIndex == -1 || healthLeft < bestHealthLeft) {
+			if (gc.can_build(unit.get_id(), other.get_id())) {
+				bestIndex = i;
+				bestHealthLeft = healthLeft;
+			}
+		}
+	}
+	if (bestIndex != -1) {
+		Unit &other = units[bestIndex];
 
-			// If it's complete, remove it from the factoriesBeingBuilt list
-			// need to re-sense the unit to get the updated structure_is_built() value
-			if (gc.sense_unit_at_location(other.get_map_location()).structure_is_built() != 0) {
-				//System.out.println("Finished a factory!");
-				bool foundIt = false;
+		gc.build(unit.get_id(), other.get_id());
 
-				if (other.get_unit_type() == Factory) {
-					for (int j = 0; j < factoriesBeingBuilt.size(); j++) {
-						if (factoriesBeingBuilt[j].get_map_location() == other.get_map_location()) {
-							factoriesBeingBuilt.erase(factoriesBeingBuilt.begin()+j);
-							foundIt = true;
-							break;
-						}
-					}
-				} else {
-					for (int j = 0; j < rocketsBeingBuilt.size(); j++) {
-						if (rocketsBeingBuilt[j].get_map_location() == other.get_map_location()) {
-							rocketsReady.push_back(other);
-							rocketsBeingBuilt.erase(rocketsBeingBuilt.begin()+j);
-							foundIt = true;
-							break;
-						}
+		// If it's complete, remove it from the factoriesBeingBuilt list
+		// need to re-sense the unit to get the updated structure_is_built() value
+		
+		// Don't need to add new object to allMyUnits, because we can just use the existing object
+		// (even though it will be out of date now that the factory is complete, it'll still work if we just
+		// don't check whether structure_is_built() in runFactory())
+		if (gc.sense_unit_at_location(other.get_map_location()).structure_is_built() != 0) {
+			//printf("Finished a factory!");
+			bool foundIt = false;
+
+			if (other.get_unit_type() == Factory) {
+				for (int j = 0; j < factoriesBeingBuilt.size(); j++) {
+					if (factoriesBeingBuilt[j].get_map_location() == other.get_map_location()) {
+						factoriesBeingBuilt.erase(factoriesBeingBuilt.begin()+j);
+						foundIt = true;
+						break;
 					}
 				}
-				if (!foundIt) {
-					printf("ERROR: Structure was expected in ___BeingBuilt, but was missing!");
+			} else {
+				for (int j = 0; j < rocketsBeingBuilt.size(); j++) {
+					if (rocketsBeingBuilt[j].get_map_location() == other.get_map_location()) {
+						rocketsReady.push_back(other);
+						rocketsBeingBuilt.erase(rocketsBeingBuilt.begin()+j);
+						foundIt = true;
+						break;
+					}
 				}
 			}
-			return true;
+			if (!foundIt) {
+				printf("ERROR: Structure was expected in ___BeingBuilt, but was missing!");
+			}
 		}
+		return true;
 	}
 	return false;
 }
