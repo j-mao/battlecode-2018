@@ -17,5 +17,5 @@ else
 	exit 1
 fi
 
-echo "$ g++ -o main.o main.cpp -c -O -g $INCLUDES -std=c++11"
-g++ -o main.o main.cpp -c -O -g $INCLUDES -DNOT_IN_DEBUG_MODE -std=c++11 -fPIC -U_FORTIFY_SOURCE
+echo "$ g++ -o main.o main.cpp -c -O3 -g $INCLUDES -DNDEBUG -std=c++11 -fPIC -U_FORTIFY_SOURCE"
+g++ -o main.o main.cpp -c -O3 -g $INCLUDES -DNDEBUG -std=c++11 -fPIC -U_FORTIFY_SOURCE
