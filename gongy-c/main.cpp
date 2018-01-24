@@ -21,7 +21,7 @@
 #define fo(i,a,b) for (int i=(a);i<(b);i++)
 #define SZ(a) ((int) a.size())
 
-#ifdef NOT_IN_DEBUG_MODE
+#ifdef NDEBUG
  #define DEBUG_OUTPUT(x...)
 #else
  #define DEBUG_OUTPUT(x...) printf(x)
@@ -451,7 +451,7 @@ int main() {
 			roundNum++;
 		}
 	} else {
-		/*gc.queue_research(Worker);
+		gc.queue_research(Worker);
 		gc.queue_research(Ranger);
 		gc.queue_research(Healer);
 		gc.queue_research(Healer);
@@ -465,20 +465,15 @@ int main() {
 		// Currently this last rocket upgrade is useless because we get it on round 750 xd.
 		// But whatever 4Head.
 		gc.queue_research(Rocket);
-		*/
-		gc.queue_research(Worker);
+		/*gc.queue_research(Worker);
 		gc.queue_research(Ranger);
 		gc.queue_research(Healer);
-		gc.queue_research(Rocket); // get on mars early
-		gc.queue_research(Mage);
-		gc.queue_research(Mage);
-		gc.queue_research(Mage);
-		gc.queue_research(Mage);   // blink mages
 		gc.queue_research(Healer);
 		gc.queue_research(Healer); // overcharge
 		gc.queue_research(Ranger);
-		gc.queue_research(Ranger); // snipe
-		gc.queue_research(Worker);
+		gc.queue_research(Worker);*/
+
+		gc.queue_research(Rocket);
 
 		int total_time = 0;
 		int prev_time_left_ms = gc.get_time_left_ms();
@@ -2239,6 +2234,11 @@ static bool mageTryToAttack(Unit& unit) {
 								kills++;
 							}
 							attackPriority += mageAttackPriorities[y][x];
+						}
+						if (y == loc.get_y() && x == loc.get_x()) {
+							// dont shoot yourself
+							kills = -420420;
+							attackPriority = -420420;
 						}
 					}
 				}
