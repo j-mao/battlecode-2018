@@ -21,7 +21,7 @@
 #define fo(i,a,b) for (int i=(a);i<(b);i++)
 #define SZ(a) ((int) a.size())
 
-#ifdef NOT_IN_DEBUG_MODE
+#ifdef NDEBUG
  #define DEBUG_OUTPUT(x...)
 #else
  #define DEBUG_OUTPUT(x...) printf(x)
@@ -462,12 +462,21 @@ int main() {
 		gc.queue_research(Healer);
 		gc.queue_research(Ranger);
 		gc.queue_research(Worker);
-		gc.queue_research(Worker);
 		gc.queue_research(Rocket);
+		gc.queue_research(Worker);
 		gc.queue_research(Worker);
 		gc.queue_research(Rocket);
 		// Currently this last rocket upgrade is useless because we get it on round 750 xd.
 		// But whatever 4Head.
+		gc.queue_research(Rocket);
+		/*gc.queue_research(Worker);
+		gc.queue_research(Ranger);
+		gc.queue_research(Healer);
+		gc.queue_research(Healer);
+		gc.queue_research(Healer); // overcharge
+		gc.queue_research(Ranger);
+		gc.queue_research(Worker);*/
+
 		gc.queue_research(Rocket);
 
 		int total_time = 0;
@@ -744,8 +753,8 @@ static void init_turn (vector<Unit>& myUnits) {
 				}
 
 				if (unit.get_unit_type() == Knight) {
-					friendlyKnightCount[loc.get_y()][loc.get_x()]++;
-				}
+ 					friendlyKnightCount[loc.get_y()][loc.get_x()]++;
+ 				}
 			}
 
 			// friendly unit counts
@@ -1396,28 +1405,28 @@ static void runFactory (Unit& unit) {
 
 	// TODO: change proportion based on current research levels
 	// Don't check for knights past round 150 to save time or something
-	bool done_choice = false;
-	if (roundNum <= 150) {
-		// danger units = fighting units or factories
-		int enemyDangerUnits, friendlyK, enemyK;
-		std::tie(enemyDangerUnits, friendlyK, enemyK) = factoryGetNearbyStuff(unit);
-		if (friendlyK < enemyK || (enemyDangerUnits > 0 && friendlyK <= enemyK)) {
-			unitTypeToBuild = Knight;
-			done_choice = true;
+ 	bool done_choice = false;
+ 	if (roundNum <= 150) {
+ 		// danger units = fighting units or factories
+ 		int enemyFactories, friendlyK, enemyK;
+ 		std::tie(enemyFactories, friendlyK, enemyK) = factoryGetNearbyStuff(unit);
+ 		if (friendlyK < enemyK || (enemyFactories > 0 && friendlyK <= enemyK)) {
+ 			unitTypeToBuild = Knight;
+ 			done_choice = true;
+ 		}
+ 	}
+ 	if (!done_choice) {
+ 		if (isSquareDangerous[loc.get_y()][loc.get_x()]) {
+ 			// dangerous square. Just build rangers, healers will just get instantly killed.
+ 			unitTypeToBuild = Ranger;
+ 		} else if (numWorkers == 0) {
+ 			unitTypeToBuild = Worker;
+ 		} else if (numRangers >= 2 * numHealers + 4) {
+ 			unitTypeToBuild = Healer;
+ 		} else if (has_blink_researched && numHealers >= 2 * numMages + 4) {
+ 			unitTypeToBuild = Mage;
 		}
-	}
-	if (!done_choice) {
-		if (isSquareDangerous[loc.get_y()][loc.get_x()]) {
-			// dangerous square. Just build rangers, healers will just get instantly killed.
-			unitTypeToBuild = Ranger;
-		} else if (numWorkers == 0) {
-			unitTypeToBuild = Worker;
-		} else if (numRangers >= 2 * numHealers + 4) {
-			unitTypeToBuild = Healer;
-		} else if (has_blink_researched && numHealers >= 2 * numMages + 4) {
-			unitTypeToBuild = Mage;
-		}
-	}
+ 	}
 
 	bool canRocket = (gc.get_research_info().get_level(Rocket) >= 1);
 	bool lowRockets = ((int) rockets_to_fill.size() + numRocketBlueprints < maxConcurrentRocketsReady);
@@ -1914,8 +1923,8 @@ static void runKnight (Unit& unit) {
 			}
 			 */
 			if (knight_bfs_to_enemy_unit(unit)) {
-				doneMove = true;
-			}
+ 				doneMove = true;
+ 			}
 		}
 
 		if (!doneMove) {
@@ -2261,6 +2270,11 @@ static bool mageTryToAttack(Unit& unit) {
 								kills++;
 							}
 							attackPriority += mageAttackPriorities[y][x];
+						}
+						if (y == loc.get_y() && x == loc.get_x()) {
+							// dont shoot yourself
+							kills = -420420;
+							attackPriority = -420420;
 						}
 					}
 				}
@@ -2803,7 +2817,7 @@ static bool isEnoughResourcesNearby(Unit& unit) {
 
 static std::tuple<int,int,int> factoryGetNearbyStuff(Unit& unit) {
 	if (!unit.is_on_map()) {
-		return {0, 0, 0};
+		return make_tuple(0, 0, 0);
 	}
 
 	static const int search_dist = 5;
@@ -2811,7 +2825,7 @@ static std::tuple<int,int,int> factoryGetNearbyStuff(Unit& unit) {
 	MapLocation loc = unit.get_map_location();
 	int locY = loc.get_y(), locX = loc.get_x();
 
-	int nearbyEnemyDangerUnits = 0;
+	int nearbyEnemyFactories = 0;
 	int nearbyFriendlyKnights = 0;
 	int nearbyEnemyKnights = 0;
 
@@ -2825,7 +2839,7 @@ static std::tuple<int,int,int> factoryGetNearbyStuff(Unit& unit) {
 							nearbyEnemyKnights++;
 						}
 						if (is_fighter_unit_type(other.get_unit_type()) || other.get_unit_type() == Factory) {
-							nearbyEnemyDangerUnits++;
+							nearbyEnemyFactories++;
 						}
 					}
 				}
@@ -2834,7 +2848,7 @@ static std::tuple<int,int,int> factoryGetNearbyStuff(Unit& unit) {
 		}
 	}
 
-	return {nearbyEnemyDangerUnits, nearbyFriendlyKnights, nearbyEnemyKnights};
+	return make_tuple(nearbyEnemyFactories, nearbyFriendlyKnights, nearbyEnemyKnights);
 }
 
 static bool bfsTowardsBlueprint(Unit& unit) {
