@@ -20,13 +20,13 @@ else
 	exit 1
 fi
 
-echo "$ g++ -o main.o main.cpp -c -O3 -g $INCLUDES -DNDEBUG -std=c++11 -fPIC -U_FORTIFY_SOURCE"
-g++ -o main.o main.cpp -c -O3 -g $INCLUDES -DNDEBUG -std=c++11 -fPIC -U_FORTIFY_SOURCE
+echo "$ g++ -o main.o main.cpp -c -O3 -g $INCLUDES -DNDEBUG -std=c++14 -fPIC -U_FORTIFY_SOURCE"
+g++ -o main.o main.cpp -c -O3 -g $INCLUDES -DNDEBUG -std=c++14 -fPIC -U_FORTIFY_SOURCE
 
 result=$?
 
 if [ $result -eq 0 ]; then
 	printf "\033[32mCompilation succeeded. You are ready to submit.\033[0m\n"
 else
-	printf "\033[32mCompilation failed. Please fix this!\033[0m\n"
+	printf "\033[31mCompilation failed. Please fix this!\033[0m\n"
 fi
