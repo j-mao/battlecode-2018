@@ -169,6 +169,9 @@ static int numEnemiesThatCanAttackSquare[55][55];
 static int distToMyStartingLocs[55][55];
 static int distToEnemyStartingLocs[55][55];
 
+static int distToNearestEnemyFighter[55][55];
+static int distToNearestFriendlyFighter[55][55];
+
 static int numIdleRangers;
 static int numIdleMages;
 
@@ -275,6 +278,7 @@ static bool rangerTryToAttack(Unit& unit);
 static bool mageTryToAttack(Unit& unit);
 static void tryToHealAndOvercharge(Unit& unit);
 static void multisourceBfsAvoidingUnitsAndDanger (vector<SimpleState>& startingLocs, int resultArr[55][55]);
+static void multisourceBfsAvoidingNothing (vector<SimpleState>& startingLocs, int resultArr[55][55]);
 static bool doReplicate(Unit& unit);
 static void checkForEnemyUnits (vector<Unit>& allUnits);
 
@@ -720,6 +724,8 @@ static void init_turn (vector<Unit>& myUnits) {
 	rockets_to_fill.clear();
 
 	vector<SimpleState> damagedFriendlyHealableUnits;
+	vector<SimpleState> enemyFighters;
+	vector<SimpleState> friendlyFighters;
 	vector<Unit> units = gc.get_units();
 
 	fo(i, 0, SZ(units)) {
@@ -745,6 +751,10 @@ static void init_turn (vector<Unit>& myUnits) {
 					time_since_damaged_unit[locY][locX] = 0;
 
 					damagedFriendlyHealableUnits.push_back(SimpleState(locY, locX));
+				}
+
+				if (is_fighter_unit_type(unit.get_unit_type())) {
+					friendlyFighters.push_back(SimpleState(loc.get_y(), loc.get_x()));
 				}
 
 				// worker cache position
@@ -798,6 +808,8 @@ static void init_turn (vector<Unit>& myUnits) {
 					// we've seen an enemy, mark as not the very early game anymore
 					is_very_early_game = false;
 
+					enemyFighters.push_back(SimpleState(locY, locX));
+
 					for (int y = locY - 10; y <= locY + 10; y++) {
 						if (y < 0 || height <= y) continue;
 						for (int x = locX - 10; x <= locX + 10; x++) {
@@ -841,20 +853,6 @@ static void init_turn (vector<Unit>& myUnits) {
 	//DEBUG_OUTPUT("%d good healer positions\n", SZ(good_healer_positions));
 
 	// calculate good positions
-	good_ranger_positions.clear();
-	for (int y = 0; y < height; y++) for (int x = 0; x < width; x++) {
-		if (RangerAttackRange < attackDistanceToEnemy[y][x] && attackDistanceToEnemy[y][x] <= OneMoveFromRangerAttackRange) {
-			is_good_ranger_position[y][x] = true;
-			good_ranger_positions.push_back(make_pair(y, x));
-			//System.out.println("good position at " + y + " " + x);
-		}
-
-		// also calculate dangerous squares
-		if (attackDistanceToEnemy[y][x] <= DangerDistanceThreshold) {
-			isSquareDangerous[y][x] = true;
-		}
-	}
-	//DEBUG_OUTPUT("Number of good ranger positions: %d\n", int(good_ranger_positions.size()));
 
 	good_mage_positions.clear();
 	fo(y, 0, height) fo(x, 0, width) {
@@ -889,6 +887,32 @@ static void init_turn (vector<Unit>& myUnits) {
 
 	// calculate distances to damaged healable friendly units
 	multisourceBfsAvoidingUnitsAndDanger(damagedFriendlyHealableUnits, distToDamagedFriendlyHealableUnit);
+
+	// calculate distances to nearest friendly and enemy fighter units
+	multisourceBfsAvoidingNothing(enemyFighters, distToNearestEnemyFighter);
+	multisourceBfsAvoidingNothing(friendlyFighters, distToNearestFriendlyFighter);
+
+	// Calculate good ranger positions
+	// Don't include:
+	// 1) impassable terrain
+	// 2) "good ranger positions" that are closer to enemy units than to ours
+	//    (This gets rid of those "unreachable", misleading "good positions" that are on the other side of their army)
+	good_ranger_positions.clear();
+	for (int y = 0; y < height; y++) for (int x = 0; x < width; x++) {
+		if (RangerAttackRange < attackDistanceToEnemy[y][x] && attackDistanceToEnemy[y][x] <= OneMoveFromRangerAttackRange &&
+			distToNearestEnemyFighter[y][x] >= distToNearestFriendlyFighter[y][x] &&
+			isPassable[y][x]) {
+			is_good_ranger_position[y][x] = true;
+			good_ranger_positions.push_back(make_pair(y, x));
+			//System.out.println("good position at " + y + " " + x);
+		}
+
+		// also calculate dangerous squares
+		if (attackDistanceToEnemy[y][x] <= DangerDistanceThreshold) {
+			isSquareDangerous[y][x] = true;
+		}
+	}
+	//DEBUG_OUTPUT("Number of good ranger positions: %d\n", int(good_ranger_positions.size()));
 
 	// attackLoc update
 	checkForEnemyUnits(units);
@@ -2534,6 +2558,40 @@ static void multisourceBfsAvoidingUnitsAndDanger (vector<SimpleState>& startingL
 			int nx = cur.x + dx[d];
 			if (0 <= ny && ny < height && 0 <= nx && nx < width &&
 					isPassable[ny][nx] && !isSquareDangerous[ny][nx] && resultArr[ny][nx] == MultisourceBfsUnreachableMax) {
+				resultArr[ny][nx] = resultArr[cur.y][cur.x] + 1;
+
+				// if the next square has a friendly unit, mark down the distance to that square but don't continue the bfs
+				// through that square
+				//if (!hasFriendlyUnit[ny][nx])
+
+				q.push(SimpleState(ny, nx));
+			}
+		}
+	}
+}
+
+// Copied from multisourceBfsAvoidingUnitsAndDanger,
+// except that we pass through everything *including* passing through impassable terrain
+static void multisourceBfsAvoidingNothing (vector<SimpleState>& startingLocs, int resultArr[55][55]) {
+	for (int y = 0; y < height; y++) for (int x = 0; x < width; x++) {
+		resultArr[y][x] = MultisourceBfsUnreachableMax;
+	}
+	queue<SimpleState> q;
+
+	for (int i = 0; i < startingLocs.size(); i++) {
+		SimpleState loc = startingLocs[i];
+		resultArr[loc.y][loc.x] = 0;
+		q.push(SimpleState(loc.y, loc.x));
+	}
+
+	while (!q.empty()) {
+		SimpleState cur = q.front();
+		q.pop();
+
+		for (int d = 0; d < 8; d++) {
+			int ny = cur.y + dy[d];
+			int nx = cur.x + dx[d];
+			if (0 <= ny && ny < height && 0 <= nx && nx < width && resultArr[ny][nx] == MultisourceBfsUnreachableMax) {
 				resultArr[ny][nx] = resultArr[cur.y][cur.x] + 1;
 
 				// if the next square has a friendly unit, mark down the distance to that square but don't continue the bfs
