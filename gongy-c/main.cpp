@@ -88,6 +88,8 @@ static bool hasEnemyUnit[55][55];
 static int enemyUnitHealth[55][55];
 static int enemyUnitId[55][55];
 
+static int friendlyKnightCount[55][55];
+
 // temporary seen array
 static bool bfs_seen[55][55];
 
@@ -267,7 +269,7 @@ static bool moveToAttackLocs (Unit& unit);
 
 static MapLocation getRandomMapLocation(Planet p, const MapLocation &giveUp);
 static void moveToTendency(Unit& unit);
-static int getRangerAttackPriority(Unit& unit);
+static int getRangerAttackPriority(const Unit& unit);
 static int getMageAttackPriority(Unit& unit);
 static bool rangerTryToAttack(Unit& unit);
 static bool mageTryToAttack(Unit& unit);
@@ -285,12 +287,14 @@ static bool doBuild(Unit& unit);
 static bool doBlueprint(Unit& unit, UnitType toBlueprint);
 static bool doRepair(Unit& unit);
 static bool isEnoughResourcesNearby(Unit& unit);
+static std::tuple<int,int,int> factoryGetNearbyStuff(Unit& unit);
 static bool tryMoveToLoc (Unit& unit, int distArray[55][55]);
 static void tryToLoadRocket (Unit& unit);
 static pair<int,int> get_closest_good_position (int y, int x, bool taken_array[55][55], vector<pair<int, int>>& good_list);
 static int get_dir_index (Direction dir);
 static bool will_blueprint_create_blockage(MapLocation loc);
 static int shortRangeBfsToBestKarbonite(Unit &unit);
+static bool knight_bfs_to_enemy_unit(Unit &unit);
 
 static void doBlueprintMovement(Unit &unit, bool &doneMove);
 static void doKarboniteMovement(Unit &unit, bool &doneMove);
@@ -675,6 +679,7 @@ static void init_turn (vector<Unit>& myUnits) {
 			isSquareDangerous[y][x] = false;
 			numEnemiesThatCanAttackSquare[y][x] = 0;
 			mageAttackPriorities[y][x] = 0;
+			friendlyKnightCount[y][x] = 0;
 
 			time_since_damaged_unit[y][x]++;
 			is_good_healer_position[y][x] = false;
@@ -746,6 +751,10 @@ static void init_turn (vector<Unit>& myUnits) {
 				if (unit.get_unit_type() == Worker) {
 					hasFriendlyWorker[loc.get_y()][loc.get_x()] = true;
 				}
+
+				if (unit.get_unit_type() == Knight) {
+ 					friendlyKnightCount[loc.get_y()][loc.get_x()]++;
+ 				}
 			}
 
 			// friendly unit counts
@@ -1395,16 +1404,29 @@ static void runFactory (Unit& unit) {
 	MapLocation loc = unit.get_map_location();
 
 	// TODO: change proportion based on current research levels
-	if (isSquareDangerous[loc.get_y()][loc.get_x()]) {
-		// dangerous square. Just build rangers, healers will just get instantly killed.
-		unitTypeToBuild = Ranger;
-	} else if (numWorkers == 0) {
-		unitTypeToBuild = Worker;
-	} else if (numRangers >= 2 * numHealers + 4) {
-		unitTypeToBuild = Healer;
-	} else if (has_blink_researched && numHealers >= 2 * numMages + 4) {
-		unitTypeToBuild = Mage;
-	}
+	// Don't check for knights past round 150 to save time or something
+ 	bool done_choice = false;
+ 	if (roundNum <= 150) {
+ 		// danger units = fighting units or factories
+ 		int enemyDangerUnits, friendlyK, enemyK;
+ 		std::tie(enemyDangerUnits, friendlyK, enemyK) = factoryGetNearbyStuff(unit);
+ 		if (friendlyK < enemyK || (enemyDangerUnits > 0 && friendlyK <= enemyK)) {
+ 			unitTypeToBuild = Knight;
+ 			done_choice = true;
+ 		}
+ 	}
+ 	if (!done_choice) {
+ 		if (isSquareDangerous[loc.get_y()][loc.get_x()]) {
+ 			// dangerous square. Just build rangers, healers will just get instantly killed.
+ 			unitTypeToBuild = Ranger;
+ 		} else if (numWorkers == 0) {
+ 			unitTypeToBuild = Worker;
+ 		} else if (numRangers >= 2 * numHealers + 4) {
+ 			unitTypeToBuild = Healer;
+ 		} else if (has_blink_researched && numHealers >= 2 * numMages + 4) {
+ 			unitTypeToBuild = Mage;
+		}
+ 	}
 
 	bool canRocket = (gc.get_research_info().get_level(Rocket) >= 1);
 	bool lowRockets = ((int) rockets_to_fill.size() + numRocketBlueprints < maxConcurrentRocketsReady);
@@ -1857,16 +1879,27 @@ static void runKnight (Unit& unit) {
 		doneMove = true;
 	}
 
-	if (unit.is_on_map()) {
+	if (unit.is_on_map() && gc.is_attack_ready(unit.get_id())) {
 		vector<Unit> units = gc.sense_nearby_units(unit.get_map_location(), unit.get_attack_range());
+		int whichToAttack = -1;
+		int whichToAttackPriority = -1;
+		int whichToAttackHealth = 9999;
 		for (int i = 0; i < units.size(); i++) {
-			Unit other = units[i];
+			const Unit &other = units[i];
 			if (other.get_team() != unit.get_team() && gc.can_attack(unit.get_id(), other.get_id())) {
-				doneMove = true;
-				if (gc.is_attack_ready(unit.get_id())) {
-					gc.attack(unit.get_id(), other.get_id());
+				int health = (int)other.get_health();
+				// ranger attack prority in knight code LuL
+				int attackPriority = (int) getRangerAttackPriority(other);
+
+				if (whichToAttack == -1 || (attackPriority>whichToAttackPriority) || (attackPriority==whichToAttackPriority && health < whichToAttackHealth)) {
+					whichToAttack = i;
+					whichToAttackPriority = attackPriority;
+					whichToAttackHealth = health;
 				}
 			}
+		}
+		if (whichToAttack != -1) {
+			gc.attack(unit.get_id(), units[whichToAttack].get_id());
 		}
 	}
 
@@ -1889,6 +1922,9 @@ static void runKnight (Unit& unit) {
 			}
 			}
 			 */
+			if (knight_bfs_to_enemy_unit(unit)) {
+ 				doneMove = true;
+ 			}
 		}
 
 		if (!doneMove) {
@@ -2115,7 +2151,7 @@ static void moveToTendency(Unit& unit) {
 }
 
 // returns the priority of the unit for a ranger to attack
-static int getRangerAttackPriority(Unit& unit){
+static int getRangerAttackPriority(const Unit& unit){
 	if (unit.get_unit_type()==Rocket || unit.get_unit_type()==Factory){
 		return 0;
 	}
@@ -2170,7 +2206,7 @@ static bool rangerTryToAttack(Unit& unit) {
 		ranger_attack_sense_stats.add(get_microseconds(before_sense, after_sense));
 		int whichToAttack = -1, whichToAttackHealth = 999, whichToAttackPriority = -1;
 		for (int i = 0; i < units.size(); i++) {
-			Unit other = units[i];
+			const Unit &other = units[i];
 			if (other.get_team() != unit.get_team() && gc.can_attack(unit.get_id(), other.get_id())) {
 				int health = (int)other.get_health();
 				int attackPriority = (int) getRangerAttackPriority(other);
@@ -2755,9 +2791,9 @@ static bool isEnoughResourcesNearby(Unit& unit) {
 		for (int x = max(locX - IsEnoughResourcesNearbySearchDist, 0); x <= min(locX + IsEnoughResourcesNearbySearchDist, width - 1); x++) {
 			if (dis[locY][locX][y][x] <= IsEnoughResourcesNearbySearchDist) {
 				nearbyKarbonite += lastKnownKarboniteAmount[y][x];
-			}
-			if (hasFriendlyWorker[y][x]) {
-				nearbyWorkers++;
+				if (hasFriendlyWorker[y][x]) {
+					nearbyWorkers++;
+				}
 			}
 		}
 	}
@@ -2777,6 +2813,42 @@ static bool isEnoughResourcesNearby(Unit& unit) {
 	}
 
 	return worthReplicating;
+}
+
+static std::tuple<int,int,int> factoryGetNearbyStuff(Unit& unit) {
+	if (!unit.is_on_map()) {
+		return {0, 0, 0};
+	}
+
+	static const int search_dist = 5;
+
+	MapLocation loc = unit.get_map_location();
+	int locY = loc.get_y(), locX = loc.get_x();
+
+	int nearbyEnemyDangerUnits = 0;
+	int nearbyFriendlyKnights = 0;
+	int nearbyEnemyKnights = 0;
+
+	for (int y = max(locY - search_dist, 0); y <= min(locY + search_dist, height - 1); y++) {
+		for (int x = max(locX - search_dist, 0); x <= min(locX + search_dist, width - 1); x++) {
+			if (dis[locY][locX][y][x] <= search_dist) {
+				if (hasEnemyUnit[y][x] && gc.can_sense_unit(enemyUnitId[y][x])) {
+					Unit other = gc.get_unit(enemyUnitId[y][x]);
+					if (other.get_team() != myTeam) {
+						if (other.get_unit_type() == Knight) {
+							nearbyEnemyKnights++;
+						}
+						if (is_fighter_unit_type(other.get_unit_type()) || other.get_unit_type() == Factory) {
+							nearbyEnemyDangerUnits++;
+						}
+					}
+				}
+				nearbyFriendlyKnights += friendlyKnightCount[y][x];
+			}
+		}
+	}
+
+	return {nearbyEnemyDangerUnits, nearbyFriendlyKnights, nearbyEnemyKnights};
 }
 
 static bool bfsTowardsBlueprint(Unit& unit) {
@@ -3023,6 +3095,63 @@ static int shortRangeBfsToBestKarbonite(Unit &unit) {
 	}
 
 	return best_dir;
+}
+
+static bool knight_bfs_to_enemy_unit(Unit &unit) {
+	// run towards enemy like an idiot
+	static const int search_dist = 7;
+
+	MapLocation loc = unit.get_map_location();
+	int start_y = loc.get_y();
+	int start_x = loc.get_x();
+	for (int y = std::max(start_y - search_dist, 0); y <= std::min(start_y + search_dist, height - 1); y++) {
+		for (int x = std::max(start_x - search_dist, 0); x <= std::min(start_x + search_dist, width - 1); x++) {
+			bfs_seen[y][x] = false;
+		}
+	}
+
+	std::queue<std::tuple<int,int,int,int>> q;
+	q.emplace(start_y, start_x, 0, DirCenterIndex);
+	bfs_seen[start_y][start_x] = true;
+
+	while (!q.empty()) {
+		int cur_y, cur_x, cur_dist, cur_starting_dir;
+		std::tie(cur_y, cur_x, cur_dist, cur_starting_dir) = q.front();
+		q.pop();
+
+		if (hasEnemyUnit[cur_y][cur_x]) {
+			if (cur_starting_dir == DirCenterIndex) {
+				printf("Error in knight bfs!");
+			} else {
+				doMoveRobot(unit, directions[cur_starting_dir]);
+			}
+			return true;
+		}
+
+		if (cur_dist >= search_dist) {
+			continue;
+		}
+
+		shuffleDirOrder();
+		for (int i = 0; i < 8; i++) {
+			int ny = cur_y + dy[randDirOrder[i]];
+			int nx = cur_x + dx[randDirOrder[i]];
+			if (0 <= ny && ny < height &&
+					0 <= nx && nx < width &&
+					isPassable[ny][nx] &&
+					!hasFriendlyUnit[ny][nx] &&
+					!bfs_seen[ny][nx]) {
+				if (cur_dist == 0) {
+					// first move, set the starting direction
+					cur_starting_dir = randDirOrder[i];
+				}
+				bfs_seen[ny][nx] = true;
+				q.emplace(ny, nx, cur_dist + 1, cur_starting_dir);
+			}
+		}
+	}
+
+	return false;
 }
 
 static void doBlueprintMovement(Unit &unit, bool &doneMove) {
