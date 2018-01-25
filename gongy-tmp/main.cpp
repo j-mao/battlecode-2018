@@ -221,6 +221,12 @@ static int getClosestFreeGoodPositionCandidates[50 * 50 + 5];
 // rocket summoning: mapping unit id to target rocket
 static map<int, pair<int, int>> unit_summon;
 
+static int rocket_arrival_time[1100];
+static bool worth_waiting[1100];
+static int last_round_worker_near_factory;
+static vector<pair<int, int>> factory_locs;
+static bool call_for_fresh_workers;
+
 // stats about quantities of friendly units
 static int numWorkers;
 static int numKnights;
@@ -240,6 +246,7 @@ static void init_global_variables ();
 static void all_pairs_shortest_path();
 int get_unit_order_priority (const Unit& unit);
 static void start_racing_to_mars ();
+static void update_mars_status ();
 static void init_turn (vector<Unit>& myUnits);
 static bool is_healable_unit_type(UnitType unitType);
 static void remove_type_from_friendly_unit_count (UnitType unitType);
@@ -306,6 +313,7 @@ static void doBlueprintMovement(Unit &unit, bool &doneMove);
 static void doKarboniteMovement(Unit &unit, bool &doneMove);
 
 static void match_units_to_rockets (vector<Unit>& input_units);
+static void summon_workers_to_factories ();
 static bool try_summon_move (Unit& unit);
 static bool get_can_rocket ();
 
@@ -537,11 +545,14 @@ int main() {
 				clock_t before_matching_to_rockets = clock();
 				match_units_to_rockets(units);
 				clock_t after_matching_to_rockets = clock();
-				// DEBUG_OUTPUT("  matching units to rockets took %6d microseconds\n", get_microseconds(before_init_turn, after_init_turn));
+				//DEBUG_OUTPUT("  matching units to rockets took %6d microseconds\n", get_microseconds(before_matching_to_rockets, after_matching_to_rockets));
 
-				if (roundNum >= 600) {
-					start_racing_to_mars();
-				}
+				clock_t before_matching_to_factories = clock();
+				summon_workers_to_factories ();
+				clock_t after_matching_to_factories = clock();
+				//DEBUG_OUTPUT("  matching workers to factories took %6d microseconds\n", get_microseconds(before_matching_to_factories, after_matching_to_factories));
+
+				update_mars_status();
 
 				clock_t before_units = clock();
 
@@ -640,7 +651,7 @@ int main() {
 
 
 				// arbitrary system!!
-				if (numIdleRangers > numRangers / 3 && numRangers > 50) {
+				if (numIdleRangers > numRangers / 3 && numRangers > 60) {
 					start_racing_to_mars();
 				}
 
@@ -729,6 +740,7 @@ static void init_turn (vector<Unit>& myUnits) {
 	//reset unit counts
 	numWorkers = 0; numKnights = 0; numRangers = 0; numMages = 0; numHealers = 0; numFactories = 0; numRockets = 0;
 	numFactoryBlueprints = 0; numRocketBlueprints = 0;
+	factory_locs.clear();
 
 	numIdleRangers = 0;
 	numIdleMages = 0;
@@ -742,6 +754,10 @@ static void init_turn (vector<Unit>& myUnits) {
 
 	fo(i, 0, SZ(units)) {
 		Unit& unit = units[i];
+
+		if (!unit.is_on_map()) {
+			continue;
+		}
 
 		// Note: This loops through friendly AND enemy units!
 		if (unit.get_team() == myTeam) {
@@ -782,8 +798,14 @@ static void init_turn (vector<Unit>& myUnits) {
 			// friendly unit counts
 			if (unit.get_unit_type() == Factory) {
 
-				if (unit.structure_is_built() != 0) numFactories++;
-				else numFactoryBlueprints++;
+				if (unit.structure_is_built() != 0) {
+					int ty = unit.get_map_location().get_y();
+					int tx = unit.get_map_location().get_x();
+					factory_locs.emplace_back(ty, tx);
+					numFactories++;
+				} else {
+					numFactoryBlueprints++;
+				}
 
 				if (unit.is_factory_producing() != 0) {
 					add_type_to_friendly_unit_count(unit.get_factory_unit_type());
@@ -946,6 +968,9 @@ static void init_turn (vector<Unit>& myUnits) {
 	}
 
 	 */
+
+	// DEBUG_OUTPUT("%d workers at start of round %d\n", numWorkers, roundNum);
+
 }
 
 static void start_racing_to_mars () {
@@ -953,13 +978,25 @@ static void start_racing_to_mars () {
 		return;
 	}
 
-
 	DEBUG_OUTPUT("Round %d: we start racing to Mars!\n", roundNum);
 	raceToMars = true;
-	maxConcurrentRocketsReady = 5;
+	maxConcurrentRocketsReady = 3;
 }
 
 static void init_global_variables () {
+
+	// calculate rocket take-off behaviour
+	fo(i, 1, 750) {
+		rocket_arrival_time[i] = gc.get_orbit_pattern().duration(i)+i;
+	}
+	int best_time = 1000*1000;
+	for (int i = 749; i >= 1; i--) {
+		best_time = min(best_time, rocket_arrival_time[i]);
+
+		if (rocket_arrival_time[i] > best_time) {
+			worth_waiting[i] = true;
+		}
+	}
 
 	fo(i, 0, 9) directions.push_back((Direction) i);
 
@@ -1023,8 +1060,8 @@ static void init_global_variables () {
 					}
 				}
 			}
-			//goodRocketLandingLocations[degree].push_back(loc);
-			goodRocketLandingLocations[8].push_back(loc);
+			goodRocketLandingLocations[degree].push_back(loc);
+			//goodRocketLandingLocations[8].push_back(loc);
 		}
 	}
 	for (int i = 0;i <= 8;i++) {
@@ -1250,6 +1287,27 @@ static void runEarthWorker (Unit& unit) {
 	unit = gc.get_unit(unit.get_id());
 	MapLocation loc = unit.get_map_location();
 
+	// sometimes we have a singular worker building rockets which is terrible
+	bool replicateForRocketRace = false;
+	if (raceToMars && isNextToBuildingBlueprint(loc)) {
+
+		int wy = loc.get_y(), wx = loc.get_x();
+		int search_area = 2, co_workers = 0;
+
+		for (int y = max(wy - search_area, 0); y <= min(wy + search_area, height - 1); y++) {
+			for (int x = max(wx - search_area, 0); x <= min(wx + search_area, width - 1); x++) {
+				if (dis[wy][wx][y][x] <= 7) {
+					if (hasFriendlyWorker[y][x] && (y!=wy || x!=wx)) {
+						co_workers++;
+					}
+				}
+			}
+		}
+		if (co_workers < 3) {
+			replicateForRocketRace = true;
+		}
+	}
+
 	// actions
 	bool doneAction = false;
 
@@ -1260,7 +1318,7 @@ static void runEarthWorker (Unit& unit) {
 	bool lowRockets = ((int) rockets_to_fill.size() + numRocketBlueprints < maxConcurrentRocketsReady);
 	bool needToSave = (gc.get_karbonite() < 75 + 15);
 
-	bool shouldReplicate = (replicateForBuilding || replicateForHarvesting);
+	bool shouldReplicate = (replicateForBuilding || replicateForHarvesting || replicateForRocketRace);
 
 	if (canRocket && lowRockets && needToSave) {
 		shouldReplicate = false;
@@ -1291,8 +1349,28 @@ static void runEarthWorker (Unit& unit) {
 			}
 		} else if (canRocket && lowRockets) {
 
-			if (doBlueprint(unit, Rocket)) {
-				doneAction = true;
+			//workers shouldn't build rockets too far away
+			bool close_to_factory = false;
+
+			for (auto factory_loc : factory_locs) {
+				int my = loc.get_y(), mx = loc.get_x(), ty, tx;
+				tie(ty, tx) = factory_loc;
+				if (dis[my][mx][ty][tx] <= 8) {
+					last_round_worker_near_factory = roundNum;
+					close_to_factory = true;
+				}
+			}
+
+			bool long_time_too_far = roundNum - last_round_worker_near_factory > 15;
+
+			if (long_time_too_far) {
+				call_for_fresh_workers = true;
+			}
+
+			if (close_to_factory) {
+				if (doBlueprint(unit, Rocket)) {
+					doneAction = true;
+				}
 			}
 
 		}
@@ -1411,7 +1489,7 @@ static void runEarthRocket (Unit& unit) {
 
 	bool fullRocket = (unit.get_structure_garrison().size() == unit.get_structure_max_capacity());
 	bool aboutToFlood = (roundNum >= 749);
-	bool notWorthWaiting = (roundNum >= 649 || gc.get_orbit_pattern().duration(roundNum)+roundNum <= gc.get_orbit_pattern().duration(roundNum+1)+roundNum+1);
+	bool notWorthWaiting = (roundNum >= 649 || !worth_waiting[roundNum]);
 	bool dangerOfDestruction = (unit.get_health() <= 70);
 
 	// DEBUG_OUTPUT("I am a rocket and I think it isn't worth waiting: %d, full? %d\n", notWorthWaiting ? 1 : 0, fullRocket ? 1 : 0);
@@ -1465,7 +1543,7 @@ static void runFactory (Unit& unit) {
 		}
 	}
 	if (!done_choice) {
-		if (numWorkers == 0) {
+		if (numWorkers == 0 || call_for_fresh_workers) {
 			unitTypeToBuild = Worker;
 		} else if (isSquareDangerous[loc.get_y()][loc.get_x()]) {
 			// dangerous square. Just build rangers, healers will just get instantly killed.
@@ -1491,6 +1569,11 @@ static void runFactory (Unit& unit) {
 		gc.produce_robot(unit.get_id(), unitTypeToBuild);
 		// make sure to immediately update unit counts
 		add_type_to_friendly_unit_count(unitTypeToBuild);
+
+		if (unitTypeToBuild == Worker && call_for_fresh_workers) {
+			printf("Produce worker to help out\n");
+			call_for_fresh_workers = false;
+		}
 	}
 
 	tryToUnload(unit);
@@ -2477,19 +2560,42 @@ static void tryToLoadRocket (Unit& unit) {
 
 	vector<Unit> loadableUnits = gc.sense_nearby_units_by_team(unit.get_map_location(), unit.get_vision_range(), myTeam);
 
+	int rocket_y = unit.get_map_location().get_y();
+	int rocket_x = unit.get_map_location().get_x();
+	int nearby_workers = 0;
+
+	// prevent draining area of workers
+	int search_area = 7;
+	for (int y = max(rocket_y - search_area, 0); y <= min(rocket_y + search_area, height - 1); y++) {
+		for (int x = max(rocket_x - search_area, 0); x <= min(rocket_x + search_area, width - 1); x++) {
+			if (dis[rocket_y][rocket_x][y][x] <= 7) {
+				if (hasFriendlyWorker[y][x] && (y!=rocket_y || x!=rocket_x)) {
+					// exclude yourself
+					nearby_workers++;
+				}
+			}
+		}
+	}
+
 	// bring along anything
 	fo(i, 0, SZ(loadableUnits)) {
 		if (gc.can_load(unit.get_id(), loadableUnits[i].get_id())) {
 
-			// this code is bad because the rocket taking off kills the fucking worker anyway, so you may as well take it
-			/*
-			   if (loadableUnits[i].get_unit_type() == Worker && numWorkers <= 4) {
-			   continue;
-			   }
-			 */
+			Unit& cand = loadableUnits[i];
 
-			remove_type_from_friendly_unit_count(loadableUnits[i].get_unit_type());
-			gc.load(unit.get_id(), loadableUnits[i].get_id());
+			// this code is bad because the rocket taking off kills the fucking worker anyway, so you may as well take it
+			if (cand.get_unit_type() == Worker && nearby_workers <= 2) {
+				continue;
+			}
+
+			remove_type_from_friendly_unit_count(cand.get_unit_type());
+			gc.load(unit.get_id(), cand.get_id());
+
+			if (cand.get_unit_type() == Worker) {
+				int cy = cand.get_map_location().get_y();
+				int cx = cand.get_map_location().get_x();
+				hasFriendlyWorker[cy][cx] = false;
+			}
 		}
 	}
 }
@@ -2697,6 +2803,7 @@ static bool doReplicate(Unit& unit) {
 		MapLocation loc = unit.get_map_location().add(replicateDir);
 		add_unit_to_all_my_units(gc.sense_unit_at_location(loc));
 		hasFriendlyUnit[loc.get_y()][loc.get_x()] = true;
+		hasFriendlyWorker[loc.get_y()][loc.get_x()] = true;
 		numWorkers++;
 		return true;
 	}
@@ -3463,6 +3570,11 @@ static MapLocation getRandomMapLocation(Planet p, const MapLocation &giveUp) {
 	return result;
 }
 
+static void summon_workers_to_factories () {
+	// not working right now
+	return;
+}
+
 static void match_units_to_rockets (vector<Unit>& input_units) {
 	if (rockets_to_fill.empty()) {
 		return;
@@ -3524,12 +3636,16 @@ static void match_units_to_rockets (vector<Unit>& input_units) {
 		fo(i, 0, SZ(sorted_by_dist)) {
 			if (healers_in_rocket > 0 && workers_in_rocket > 0) {
 				break;
-				break;
 			}
 
-			int id;
+			int id, my_dis;
 			UnitType type;
-			tie(ignore, id, type) = sorted_by_dist[i];
+			tie(my_dis, id, type) = sorted_by_dist[i];
+
+			// adjacent workers don't need summons
+			if (my_dis == 1 && type == Worker) {
+				continue;
+			}
 
 			// don't bleed out of workers
 			if (numWorkers <= 2 && type == Worker) {
@@ -3556,12 +3672,17 @@ static void match_units_to_rockets (vector<Unit>& input_units) {
 				break;
 			}
 
-			int id;
+			int id, my_dis;
 			UnitType type;
-			tie(ignore, id, type) = sorted_by_dist[i];
+			tie(my_dis, id, type) = sorted_by_dist[i];
 
 			if (id == c_healer || id == c_worker) {
 				// don't double count on yourself
+				continue;
+			}
+
+			// adjacent workers don't need summons
+			if (my_dis == 1 && type == Worker) {
 				continue;
 			}
 
@@ -3612,4 +3733,19 @@ static bool get_can_rocket () {
 	}
 
 	return canRocket;
+}
+
+// TODO : leave 3 workers on Earth (don't take with you on rocket)
+// TODO : don't let rockets take off with nearby units, make nearby units evacuate or avoid blast
+// TODO : make rocket take-off cycles synchronised
+
+static void update_mars_status () {
+	if (roundNum >= 600) {
+		start_racing_to_mars();
+	}
+	// arbitrary thing for concurrent rocket
+	// maxConcurrentRocketsReady = max(2, (numRangers / 18));
+	if (roundNum >= 620) {
+		maxConcurrentRocketsReady = 1000;
+	}
 }
