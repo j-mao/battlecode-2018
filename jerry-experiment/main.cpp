@@ -27,6 +27,19 @@
  #define DEBUG_OUTPUT(x...) printf(x)
 #endif
 
+#ifdef assert
+ #undef assert
+#endif
+void failure_occurred(const char *assertion, const char *file, const unsigned line) {
+	printf("[ASSERTION FAILED] %s:%d    %s\n", file, line, assertion);
+	fflush(stdout);
+	exit(1);
+}
+#define assert(expr) \
+ ((expr) \
+  ?  (void) (0) \
+  : failure_occurred(#expr, __FILE__, __LINE__))
+
 using namespace bc;
 using namespace std;
 using namespace std::chrono;
@@ -34,7 +47,6 @@ using namespace std::chrono;
 static int roundNum;
 
 static bool raceToMars = false;
-static bool can_rush_enemy = false;
 
 static int maxConcurrentRocketsReady = 2;
 
@@ -88,6 +100,7 @@ static bool hasFriendlyStructure[55][55];
 static bool hasEnemyUnit[55][55];
 static int enemyUnitHealth[55][55];
 static int enemyUnitId[55][55];
+static int availableOverchargeId[55][55];
 
 static int friendlyKnightCount[55][55];
 
@@ -113,7 +126,6 @@ static int randDirOrder[55];
 static vector<Unit> factoriesBeingBuilt;
 static vector<Unit> rocketsBeingBuilt;
 static vector<Unit> rockets_to_fill;
-static int num_rockets_sent;
 
 // team defs
 static Team myTeam;
@@ -194,6 +206,10 @@ static bool is_very_early_game;
 static bool has_overcharge_researched;
 static bool has_blink_researched;
 
+// we are ready to build mages once we have overcharge, or once we are "close" to getting overcharge
+static const unsigned CLOSE_TO_RESEARCH_DONE = 40; // 40 turns
+static bool ready_for_mages;
+
 static const int MultisourceBfsUnreachableMax = 499;
 static bool can_reach_from_spawn[55][55];
 
@@ -260,8 +276,9 @@ static void computeBattalionSizes();
 static void runBattalions(vector<Unit>& myUnits);
 
 static void calculateManhattanDistancesToClosestEnemies(vector<Unit>& allUnits);
-static void doMoveRobot (Unit& unit, Direction dir);
+static void doMoveRobot (Unit& unit, Direction dir, bool force=false);
 static void doBlinkRobot (Unit& unit, Direction dir);
+static bool doOvercharge (const std::pair<int, int> &healer_loc, Unit &unit_to_overcharge);
 static void shuffleDirOrder();
 static bool tryToMoveToRocket (Unit& unit );
 static int getTendency(Unit& unit);
@@ -271,14 +288,16 @@ static int getSpaceAround(MapLocation loc);
 static bool isFriendlyStructure(Unit unit);
 static bool isNextToBuildingBlueprint(MapLocation loc);
 static bool moveToAttackLocs (Unit& unit);
+static void get_available_overcharges_in_range(Unit& unit, std::vector<std::pair<int, int>> &result_vector);
 
 static MapLocation getRandomMapLocation(Planet p, const MapLocation &giveUp);
 static void moveToTendency(Unit& unit);
 static int getRangerAttackPriority(const Unit& unit);
 static int getMageAttackPriority(Unit& unit);
+static int getKnightAttackPriority(Unit& unit);
 static bool rangerTryToAttack(Unit& unit);
 static bool mageTryToAttack(Unit& unit);
-static void tryToHealAndOvercharge(Unit& unit);
+static void tryToHeal(Unit& unit);
 static void multisourceBfsAvoidingUnitsAndDanger (vector<SimpleState>& startingLocs, int resultArr[55][55]);
 static void multisourceBfsAvoidingNothing (vector<SimpleState>& startingLocs, int resultArr[55][55]);
 static bool doReplicate(Unit& unit);
@@ -307,7 +326,6 @@ static void doKarboniteMovement(Unit &unit, bool &doneMove);
 
 static void match_units_to_rockets (vector<Unit>& input_units);
 static bool try_summon_move (Unit& unit);
-static bool get_can_rocket ();
 
 static inline int distance_squared(int dy, int dx) {
 	return dy * dy + dx * dx;
@@ -338,7 +356,7 @@ static void add_unit_to_all_my_units (const Unit &unit) {
 }
 
 static int get_dir_index (Direction dir) {
-	fo(i, 0, 9) if (directions[i] == dir) {
+	fo(i, 0, 8) if (directions[i] == dir) {
 		return i;
 	}
 	DEBUG_OUTPUT("ERROR: Couldn't find dir index for %d\n", dir);
@@ -401,6 +419,9 @@ int main() {
 	init_global_variables();
 	DEBUG_OUTPUT("Finished init_global_variables()\n");
 
+	reach_enemy_result = can_reach_enemy_on_earth();
+	DEBUG_OUTPUT("reach_enemy_result: %d\n",reach_enemy_result);
+
 	if (myPlanet == Mars) {
 		while (true) {
 			// DEBUG_OUTPUT("Starting round %d\n", roundNum);
@@ -462,9 +483,11 @@ int main() {
 		gc.queue_research(Worker);
 		gc.queue_research(Ranger);
 		gc.queue_research(Healer);
+		gc.queue_research(Healer);
+		gc.queue_research(Healer);
+		gc.queue_research(Mage);
+		gc.queue_research(Mage);
 		gc.queue_research(Rocket);
-		gc.queue_research(Healer);
-		gc.queue_research(Healer);
 		gc.queue_research(Ranger);
 		gc.queue_research(Worker);
 		gc.queue_research(Worker);
@@ -474,46 +497,37 @@ int main() {
 		// But whatever 4Head.
 		gc.queue_research(Rocket);
 		/*gc.queue_research(Worker);
-		  gc.queue_research(Ranger);
-		  gc.queue_research(Healer);
-		  gc.queue_research(Healer);
-		  gc.queue_research(Healer); // overcharge
-		  gc.queue_research(Ranger);
-		  gc.queue_research(Worker);*/
-
-		gc.queue_research(Rocket);
+		gc.queue_research(Ranger);
+		gc.queue_research(Healer);
+		gc.queue_research(Healer);
+		gc.queue_research(Healer); // overcharge
+		gc.queue_research(Ranger);
+		gc.queue_research(Worker);*/
 
 		int total_time = 0;
 		int prev_time_left_ms = gc.get_time_left_ms();
 		clock_t prev_time = clock();
 		high_resolution_clock::time_point prev_point = high_resolution_clock::now();
 
-		reach_enemy_result = can_reach_enemy_on_earth();
-		DEBUG_OUTPUT("reach_enemy_result: %d\n",reach_enemy_result);
-
-		if (reach_enemy_result == CANT_REACH_ENEMY) {
-			start_racing_to_mars();
-		}
-
 		while (true) {
-			//DEBUG_OUTPUT("\n======================\nStarting round %d\n", roundNum);
+			DEBUG_OUTPUT("\n======================\nStarting round %d\n", roundNum);
 			if (gc.get_time_left_ms() < 300) {
 				DEBUG_OUTPUT("Warning: Running out of time! Skipping turn! (Less than 300 ms left.)\n");
 			} else {
 				/*int cur_time_left_ms = gc.get_time_left_ms();
-				  clock_t cur_time = clock();
-				  high_resolution_clock::time_point cur_point = high_resolution_clock::now();
-				  static const int extra_time_per_round_ms = 25;
-				  DEBUG_OUTPUT("time left (milliseconds): %d\n", cur_time_left_ms);
-				  DEBUG_OUTPUT(" gc time             (milliseconds) used last round (with correction) = %6d\n", int(prev_time_left_ms - cur_time_left_ms) + extra_time_per_round_ms);
-				  DEBUG_OUTPUT("  c time  (cpu time) (MICROseconds) used last round                   = %6d\n", get_microseconds(prev_time, cur_time));
-				  std::cout << "c++ time (real time) (MICROseconds) used last round                   = " << std::setw(6) << (int)duration_cast<microseconds>(cur_point - prev_point).count() << std::endl;
-				  DEBUG_OUTPUT("\n");
-				  total_time += (int)duration_cast<milliseconds>(cur_point - prev_point).count();
-				  DEBUG_OUTPUT("total time for the game so far (milliseconds) = %d\n", total_time);
-				  prev_time_left_ms = cur_time_left_ms;
-				  prev_time = cur_time;
-				  prev_point = cur_point;*/
+				clock_t cur_time = clock();
+				high_resolution_clock::time_point cur_point = high_resolution_clock::now();
+				static const int extra_time_per_round_ms = 25;
+				DEBUG_OUTPUT("time left (milliseconds): %d\n", cur_time_left_ms);
+				DEBUG_OUTPUT(" gc time             (milliseconds) used last round (with correction) = %6d\n", int(prev_time_left_ms - cur_time_left_ms) + extra_time_per_round_ms);
+				DEBUG_OUTPUT("  c time  (cpu time) (MICROseconds) used last round                   = %6d\n", get_microseconds(prev_time, cur_time));
+				std::cout << "c++ time (real time) (MICROseconds) used last round                   = " << std::setw(6) << (int)duration_cast<microseconds>(cur_point - prev_point).count() << std::endl;
+				DEBUG_OUTPUT("\n");
+				total_time += (int)duration_cast<milliseconds>(cur_point - prev_point).count();
+				DEBUG_OUTPUT("total time for the game so far (milliseconds) = %d\n", total_time);
+				prev_time_left_ms = cur_time_left_ms;
+				prev_time = cur_time;
+				prev_point = cur_point;*/
 
 				TimeStats get_unit_stats("Getting units from allMyUnits");
 				TimeStats ranger_stats("Ranger");
@@ -537,11 +551,12 @@ int main() {
 				clock_t before_matching_to_rockets = clock();
 				match_units_to_rockets(units);
 				clock_t after_matching_to_rockets = clock();
-				// DEBUG_OUTPUT("  matching units to rockets took %6d microseconds\n", get_microseconds(before_init_turn, after_init_turn));
+				DEBUG_OUTPUT("  matching units to rockets took %6d microseconds\n", get_microseconds(before_init_turn, after_init_turn));
 
-				if (roundNum >= 600) {
+				if (roundNum >= 400) {
 					start_racing_to_mars();
 				}
+
 
 				clock_t before_units = clock();
 
@@ -626,25 +641,19 @@ int main() {
 
 				// Stats section 3: printing
 				/*
-				   get_unit_stats.print();
-				   queue_pop_stats.print();
-				 */
+				get_unit_stats.print();
+				queue_pop_stats.print();
+				*/
 				/*ranger_stats.print();
-				  healer_stats.print();
-				  worker_stats.print();
-				  factory_stats.print();
-				  rocket_stats.print();
-				  ranger_attack_stats.print();
-				  ranger_attack_sense_stats.print();*/
+				healer_stats.print();
+				worker_stats.print();
+				factory_stats.print();
+				rocket_stats.print();
+				ranger_attack_stats.print();
+				ranger_attack_sense_stats.print();*/
 				//gc_get_unit_stats.print();
 
-
-				// arbitrary system!!
-				if (numIdleRangers > numRangers / 3 && numRangers > 50) {
-					start_racing_to_mars();
-				}
-
-				// DEBUG_OUTPUT("Number of idle rangers is %3d / %3d\n", numIdleRangers, numRangers);
+				//DEBUG_OUTPUT("Number of idle rangers is %3d / %3d\n", numIdleRangers, numRangers);
 			}
 
 			fflush(stdout);
@@ -696,6 +705,7 @@ static void init_turn (vector<Unit>& myUnits) {
 			numEnemiesThatCanAttackSquare[y][x] = 0;
 			mageAttackPriorities[y][x] = 0;
 			friendlyKnightCount[y][x] = 0;
+			availableOverchargeId[y][x] = -1;
 
 			time_since_damaged_unit[y][x]++;
 			is_good_healer_position[y][x] = false;
@@ -723,8 +733,24 @@ static void init_turn (vector<Unit>& myUnits) {
 
 	// Research
 	ResearchInfo research_info = gc.get_research_info();
-	has_overcharge_researched = research_info.get_level(Healer) >= 3;
-	has_blink_researched = research_info.get_level(Mage) >= 4;
+	if (!has_overcharge_researched) {
+		has_overcharge_researched = research_info.get_level(Healer) >= 3;
+	}
+	if (!has_blink_researched) {
+		has_blink_researched = research_info.get_level(Mage) >= 4;
+	}
+	if (!ready_for_mages) {
+		// healer is already level 2
+		if (research_info.get_level(Healer) >= 2) {
+			// healer is going to level 3
+			if (research_info.has_next_in_queue() && research_info.next_in_queue() == Healer) {
+				// healer level 3 upgrade nearly done
+				if (research_info.rounds_left() <= CLOSE_TO_RESEARCH_DONE) {
+					ready_for_mages = true;
+				}
+			}
+		}
+	}
 
 	//reset unit counts
 	numWorkers = 0; numKnights = 0; numRangers = 0; numMages = 0; numHealers = 0; numFactories = 0; numRockets = 0;
@@ -775,7 +801,11 @@ static void init_turn (vector<Unit>& myUnits) {
 				}
 
 				if (unit.get_unit_type() == Knight) {
-					friendlyKnightCount[loc.get_y()][loc.get_x()]++;
+ 					friendlyKnightCount[loc.get_y()][loc.get_x()]++;
+				}
+
+				if (has_overcharge_researched && unit.get_unit_type() == Healer && unit.get_ability_heat() < 10) {
+					availableOverchargeId[loc.get_y()][loc.get_x()] = unit.get_id();
 				}
 			}
 
@@ -919,8 +949,8 @@ static void init_turn (vector<Unit>& myUnits) {
 	good_ranger_positions.clear();
 	for (int y = 0; y < height; y++) for (int x = 0; x < width; x++) {
 		if (RangerAttackRange < attackDistanceToEnemy[y][x] && attackDistanceToEnemy[y][x] <= OneMoveFromRangerAttackRange &&
-				distToNearestEnemyFighter[y][x] >= distToNearestFriendlyFighter[y][x] &&
-				isPassable[y][x]) {
+			distToNearestEnemyFighter[y][x] >= distToNearestFriendlyFighter[y][x] &&
+			isPassable[y][x]) {
 			is_good_ranger_position[y][x] = true;
 			good_ranger_positions.push_back(make_pair(y, x));
 			//System.out.println("good position at " + y + " " + x);
@@ -953,8 +983,6 @@ static void start_racing_to_mars () {
 		return;
 	}
 
-
-	DEBUG_OUTPUT("Round %d: we start racing to Mars!\n", roundNum);
 	raceToMars = true;
 	maxConcurrentRocketsReady = 5;
 }
@@ -1030,14 +1058,6 @@ static void init_global_variables () {
 	for (int i = 0;i <= 8;i++) {
 		random_shuffle(goodRocketLandingLocations[i].begin(), goodRocketLandingLocations[i].end());
 	}
-
-	int min_dist_to_enemy = 1000*1000;
-	for (auto i : myStartingUnits) {
-		for (auto j : enemyStartingUnits) {
-			min_dist_to_enemy = min(min_dist_to_enemy, dis[i.y][i.x][j.y][j.x]);
-		}
-	}
-	can_rush_enemy = (min_dist_to_enemy <= 15);
 }
 
 int get_unit_order_priority (const Unit& unit) {
@@ -1045,10 +1065,24 @@ int get_unit_order_priority (const Unit& unit) {
 		// Actually not sure whether fighting units or workers should go first... so just use the same priority...
 		case Ranger:
 		case Knight:
-		case Mage:
 		case Healer:
 			// Worker before factory so that workers can finish a currently building factory before the factory runs
 		case Worker:
+			if (unit.get_location().is_on_map()) {
+				MapLocation loc = unit.get_map_location();
+				// give priority to units that are closer to enemies
+				// NOTE: the default value for manhattanDistanceToNearestEnemy (ie the value when there are no nearby
+				//   enemies) should be less than 998 so that priorities don't get mixed up!
+				// NOTE: since we're giving priority to units that are closer to enemies, the frontline rangers should
+				//   run before healers, so that healers can overcharge them. Idk hopefully it works out xd.
+				return 1999 + manhattanDistanceToNearestEnemy[loc.get_y()][loc.get_x()];
+			} else {
+				return 2998;
+			}
+			// Factory before rocket so that factory can make a unit, then unit can get in rocket before the rocket runs
+			// Edit: not actually sure if you can actually do that lol... whatever.
+		case Mage:
+			// Run mages before others so that they get overcharge
 			if (unit.get_location().is_on_map()) {
 				MapLocation loc = unit.get_map_location();
 				// give priority to units that are closer to enemies
@@ -1060,12 +1094,10 @@ int get_unit_order_priority (const Unit& unit) {
 			} else {
 				return 1998;
 			}
-			// Factory before rocket so that factory can make a unit, then unit can get in rocket before the rocket runs
-			// Edit: not actually sure if you can actually do that lol... whatever.
 		case Factory:
-			return 1999;
-		case Rocket:
 			return 2999;
+		case Rocket:
+			return 3999;
 	}
 	DEBUG_OUTPUT("ERROR: getUnitOrderPriority() does not recognise this unit type!");
 	return 9998;
@@ -1145,16 +1177,30 @@ static void all_pairs_shortest_path () {
 	}
 }
 
-static void doMoveRobot (Unit& unit, Direction dir) {
+// default argument for force is false
+// if force is true, the move will be forced to occur, even if caches are corrupted
+static void doMoveRobot (Unit& unit, Direction dir, bool force) {
 	if (gc.can_move(unit.get_id(), dir)) {
 		MapLocation loc = unit.get_map_location();
 		if (!hasFriendlyUnit[loc.get_y()][loc.get_x()]) {
-			DEBUG_OUTPUT("Error: hasFriendlyUnit[][] is incorrect!");
-			return;
+			DEBUG_OUTPUT("Error: hasFriendlyUnit[][] is incorrect!\n");
+			if (!force) {
+				return;
+			}
 		}
+		MapLocation next_loc = loc.add(dir);
 		/*hasFriendlyUnit[loc.get_y()][loc.get_x()] = false;
-		  MapLocation next_loc = loc.add(dir);
-		  hasFriendlyUnit[next_loc.get_y()][next_loc.get_x()] = true;*/
+		hasFriendlyUnit[next_loc.get_y()][next_loc.get_x()] = true;*/
+
+		// update locations of healers with overcharge off cooldown
+		if (unit.get_unit_type() == Healer && availableOverchargeId[loc.get_y()][loc.get_x()] != -1) {
+			if (availableOverchargeId[loc.get_y()][loc.get_x()] != unit.get_id()) {
+				DEBUG_OUTPUT("Error: availableOverchargeId[][] is incorrect! FIX THIS!!\n");
+			}
+			availableOverchargeId[loc.get_y()][loc.get_x()] = -1;
+			availableOverchargeId[next_loc.get_y()][next_loc.get_x()] = unit.get_id();
+		}
+		
 		gc.move_robot(unit.get_id(), dir);
 	}
 }
@@ -1170,6 +1216,27 @@ static void doBlinkRobot (Unit& unit, MapLocation where) {
 		hasFriendlyUnit[where.get_y()][where.get_x()] = true;
 		gc.blink(unit.get_id(), where);
 	}
+}
+
+static bool doOvercharge (const std::pair<int, int> &healer_loc, Unit &unit_to_overcharge) {
+	int loc_y = healer_loc.first;
+	int loc_x = healer_loc.second;
+	int healer_id = availableOverchargeId[loc_y][loc_x];
+
+	if (!gc.can_overcharge(healer_id, unit_to_overcharge.get_id())) {
+		return false;
+	}
+
+	// rip can_overcharge doesn't exist...
+	// I guess we'll just always return true and hope that it doesn't crash
+	printf("healer at %d %d overcharging unit at %d %d\n", loc_x, loc_y, unit_to_overcharge.get_map_location().get_x(),
+		unit_to_overcharge.get_map_location().get_y());
+	gc.overcharge(healer_id, unit_to_overcharge.get_id());
+
+	// remove available overcharge
+	availableOverchargeId[loc_y][loc_x] = -1;
+
+	return true;
 }
 
 static void shuffleDirOrder() {
@@ -1256,7 +1323,7 @@ static void runEarthWorker (Unit& unit) {
 	bool replicateForBuilding = (numFactories + numFactoryBlueprints > 0 && numWorkers < 6);
 	bool replicateForHarvesting = distToKarbonite[loc.get_y()][loc.get_x()] < IsEnoughResourcesNearbySearchDist && isEnoughResourcesNearby(unit);
 
-	bool canRocket = get_can_rocket();
+	bool canRocket = (gc.get_research_info().get_level(Rocket) >= 1);
 	bool lowRockets = ((int) rockets_to_fill.size() + numRocketBlueprints < maxConcurrentRocketsReady);
 	bool needToSave = (gc.get_karbonite() < 75 + 15);
 
@@ -1434,7 +1501,6 @@ static void runEarthRocket (Unit& unit) {
 		}
 
 		gc.launch_rocket(unit.get_id(), where);
-		num_rockets_sent++;
 	}
 }
 
@@ -1454,30 +1520,32 @@ static void runFactory (Unit& unit) {
 
 	// TODO: change proportion based on current research levels
 	// Don't check for knights past round 150 to save time or something
-	bool done_choice = false;
-	if (roundNum <= 150) {
-		// danger units = fighting units or factories
-		int enemyFactories, friendlyK, enemyK;
-		std::tie(enemyFactories, friendlyK, enemyK) = factoryGetNearbyStuff(unit);
-		if (can_rush_enemy || friendlyK < enemyK || (enemyFactories > 0 && friendlyK <= enemyK)) {
-			unitTypeToBuild = Knight;
-			done_choice = true;
+ 	bool done_choice = false;
+ 	if (roundNum <= 150) {
+ 		// danger units = fighting units or factories
+ 		int enemyFactories, friendlyK, enemyK;
+ 		std::tie(enemyFactories, friendlyK, enemyK) = factoryGetNearbyStuff(unit);
+ 		if (friendlyK < enemyK || (enemyFactories > 0 && friendlyK <= enemyK)) {
+ 			unitTypeToBuild = Knight;
+ 			done_choice = true;
+ 		}
+ 	}
+ 	if (!done_choice) {
+ 		if (isSquareDangerous[loc.get_y()][loc.get_x()]) {
+ 			// dangerous square. Just build rangers, healers will just get instantly killed.
+ 			unitTypeToBuild = Ranger;
+ 		} else if (numWorkers == 0) {
+ 			unitTypeToBuild = Worker;
+ 		} else if (numRangers >= 2 * numHealers + 4) {
+ 			unitTypeToBuild = Healer;
+ 		} else if (numKnights < 5) {
+ 			unitTypeToBuild = Knight;
+		} else if (ready_for_mages && numHealers >= 2 * numMages) {
+ 			unitTypeToBuild = Mage;
 		}
-	}
-	if (!done_choice) {
-		if (numWorkers == 0) {
-			unitTypeToBuild = Worker;
-		} else if (isSquareDangerous[loc.get_y()][loc.get_x()]) {
-			// dangerous square. Just build rangers, healers will just get instantly killed.
-			unitTypeToBuild = Ranger;
-		} else if (numRangers >= 2 * numHealers + 4) {
-			unitTypeToBuild = Healer;
-		} else if (has_blink_researched && numHealers >= 2 * numMages + 4) {
-			unitTypeToBuild = Mage;
-		}
-	}
+ 	}
 
-	bool canRocket = get_can_rocket();
+	bool canRocket = (gc.get_research_info().get_level(Rocket) >= 1);
 	bool lowRockets = ((int) rockets_to_fill.size() + numRocketBlueprints < maxConcurrentRocketsReady);
 	int unitCost = (unitTypeToBuild == Worker ? 25 : 20);
 	bool needToSave = (gc.get_karbonite() < 75 + unitCost);
@@ -1776,10 +1844,11 @@ static void runMage (Unit& unit) {
 						}
 					}	
 				}
-			} else {
+			} else if (!doneAttack && gc.is_attack_ready(unit.get_id())) {
 				// currently within a move and a blink of enemy
-				if (!doneAttack && gc.is_attack_ready(unit.get_id()) && gc.is_blink_ready(unit.get_id())) {
-					// start with a blink
+				// lets bomb them with a mage
+				if (attackDistanceToEnemy[myY][myX] > OneMoveFromMageAttackRange && gc.is_blink_ready(unit.get_id())) {
+					// we are too far away and need to blink
 					// warning: constants
 					MapLocation curLoc = unit.get_map_location();
 					MapLocation newLoc = nullMapLocation;
@@ -1796,10 +1865,6 @@ static void runMage (Unit& unit) {
 
 					if (newLoc != nullMapLocation) {
 
-						// prevent ourselves from wafting away again
-						// no matter what happens, perseverance is a must
-						doneMove = true;
-
 						doBlinkRobot(unit, newLoc);
 
 						// update unit location
@@ -1808,29 +1873,87 @@ static void runMage (Unit& unit) {
 						clock_t after_gc_get_unit = clock();
 						gc_get_unit_stats.add(get_microseconds(before_gc_get_unit, after_gc_get_unit));
 
-						// follow it up with a move
-						int best = -1, bestNumEnemies = 999;
+					}
+				}
+				if (!has_blink_researched && attackDistanceToEnemy[myY][myX] > OneMoveFromMageAttackRange) {
+					// we are too far away but cannot blink, so overcharge to move
+					// only do this if blink is not researched; using overcharge to suicide a mage that can blink is silly
+					std::vector<std::pair<int, int>> available_overcharge_list;
+					get_available_overcharges_in_range(unit, available_overcharge_list);
+					MapLocation resultantLocation(unit.get_map_location());
+					vector<Direction> moveDirs;
+					vector<size_t> whoIsOvercharging;
+					for (size_t i = 0; i < available_overcharge_list.size(); i++) {
+						if (attackDistanceToEnemy[resultantLocation.get_y()][resultantLocation.get_x()] <= OneMoveFromMageAttackRange) {
+							break;
+						}
 						shuffleDirOrder();
-						for (int i = 0; i < 8; i++) {
-							Direction dir = directions[randDirOrder[i]];
-							MapLocation loc = unit.get_map_location().add(dir);
-							if (0 <= loc.get_y() && loc.get_y() < height &&
-									0 <= loc.get_x() && loc.get_x() < width &&
-									attackDistanceToEnemy[loc.get_y()][loc.get_x()] <= MageAttackRange &&
-									gc.can_move(unit.get_id(), dir)) {
-								int numEnemies = numEnemiesThatCanAttackSquare[loc.get_y()][loc.get_x()];
-								if (numEnemies < bestNumEnemies) {
-									best = i;
-									bestNumEnemies = numEnemies;
+						int best = -1, bestDist = -1;
+						for (int j = 0; j < 8; j++) {
+							MapLocation newLocation(resultantLocation.add(directions[randDirOrder[j]]));
+							if (EarthMap.is_on_map(newLocation)) {
+								// check distance first to save on gc calls
+								int alt = attackDistanceToEnemy[newLocation.get_y()][newLocation.get_x()];
+								if (best == -1 || alt < bestDist) {
+									// warning: constant used (healer overcharge radius)
+									if (distance_squared(available_overcharge_list[i].first-newLocation.get_y(), available_overcharge_list[i].second-newLocation.get_x()) <= 30) {
+										if (gc.can_sense_location(newLocation)) {
+											if (gc.is_occupiable(newLocation)) {
+												best = j;
+												bestDist = alt;
+											}
+										}
+									}
 								}
 							}
 						}
-
-						if (best != -1) {
-							Direction dir = directions[randDirOrder[best]];
-							doMoveRobot(unit, dir);
-							unit = gc.get_unit(unit.get_id());
+						if (best == -1) {
+							break;
 						}
+						moveDirs.push_back(directions[randDirOrder[best]]);
+						whoIsOvercharging.push_back(i);
+						resultantLocation = resultantLocation.add(directions[randDirOrder[best]]);
+					}
+					if (attackDistanceToEnemy[resultantLocation.get_y()][resultantLocation.get_x()] <= OneMoveFromMageAttackRange) {
+						// a path was found; lets do this
+						for (size_t i = 0; i < moveDirs.size(); i++) {
+							// the final argument forces the move to occur, whether or not caches were corrupted
+							// multiple moves screw up caches badly so we must force
+							doMoveRobot(unit, moveDirs[i], true);
+							// update location
+							unit = gc.get_unit(unit.get_id());
+							mageTryToAttack(unit); // attack for free
+							if (doOvercharge(available_overcharge_list[whoIsOvercharging[i]], unit)) {
+							}
+						}
+					}
+				}
+				// do a move to attack
+				myY = unit.get_map_location().get_y();
+				myX = unit.get_map_location().get_x();
+				if (attackDistanceToEnemy[myY][myX] <= OneMoveFromMageAttackRange) {
+					int best = -1, bestNumEnemies = 999;
+					shuffleDirOrder();
+					for (int i = 0; i < 8; i++) {
+						Direction dir = directions[randDirOrder[i]];
+						MapLocation loc = unit.get_map_location().add(dir);
+						if (0 <= loc.get_y() && loc.get_y() < height &&
+								0 <= loc.get_x() && loc.get_x() < width &&
+								attackDistanceToEnemy[loc.get_y()][loc.get_x()] <= MageAttackRange &&
+								gc.can_move(unit.get_id(), dir)) {
+							int numEnemies = numEnemiesThatCanAttackSquare[loc.get_y()][loc.get_x()];
+							if (numEnemies < bestNumEnemies) {
+								best = i;
+								bestNumEnemies = numEnemies;
+							}
+						}
+					}
+
+					if (best != -1) {
+						Direction dir = directions[randDirOrder[best]];
+						doMoveRobot(unit, dir, true);
+						unit = gc.get_unit(unit.get_id());
+						doneMove = true;
 					}
 				}
 			}
@@ -1934,11 +2057,10 @@ static void runKnight (Unit& unit) {
 		int whichToAttackPriority = -1;
 		int whichToAttackHealth = 9999;
 		for (int i = 0; i < units.size(); i++) {
-			const Unit &other = units[i];
+			Unit &other = units[i];
 			if (other.get_team() != unit.get_team() && gc.can_attack(unit.get_id(), other.get_id())) {
 				int health = (int)other.get_health();
-				// ranger attack prority in knight code LuL
-				int attackPriority = (int) getRangerAttackPriority(other);
+				int attackPriority = (int) getKnightAttackPriority(other);
 
 				if (whichToAttack == -1 || (attackPriority>whichToAttackPriority) || (attackPriority==whichToAttackPriority && health < whichToAttackHealth)) {
 					whichToAttack = i;
@@ -1972,8 +2094,8 @@ static void runKnight (Unit& unit) {
 			}
 			 */
 			if (knight_bfs_to_enemy_unit(unit)) {
-				doneMove = true;
-			}
+ 				doneMove = true;
+ 			}
 		}
 
 		if (!doneMove) {
@@ -1991,7 +2113,7 @@ static void runKnight (Unit& unit) {
 }
 
 static void runHealer (Unit& unit) {
-	tryToHealAndOvercharge(unit);
+	tryToHeal(unit);
 	bool doneMove = false;
 
 	if (!doneMove && try_summon_move(unit)) {
@@ -2027,7 +2149,7 @@ static void runHealer (Unit& unit) {
 	// update unit location and cooldowns
 	unit = gc.get_unit(unit.get_id());
 
-	tryToHealAndOvercharge(unit);
+	tryToHeal(unit);
 }
 
 static bool tryToMoveToRocket (Unit& unit ) {
@@ -2189,6 +2311,21 @@ static bool moveToAttackLocs (Unit& unit) {
 	return tryMoveToLoc(unit, dis[bestLoc.get_y()][bestLoc.get_x()]);
 }
 
+static void get_available_overcharges_in_range(Unit& unit, std::vector<std::pair<int, int>> &result_vector) {
+	MapLocation loc = unit.get_map_location();
+	int loc_y = loc.get_y();
+	int loc_x = loc.get_x();
+
+	// Warning: constant being used (healer overcharge range)
+	for (int y = std::max(0, loc_y - 5); y <= std::min(height - 1, loc_y + 5); y++) {
+		for (int x = std::max(0, loc_x - 5); x <= std::min(width - 1, loc_x + 5); x++) {
+			if (distance_squared(loc_y - y, loc_x - x) <= 30 && availableOverchargeId[y][x] != -1) {
+				result_vector.emplace_back(y, x);
+			}
+		}
+	}
+}
+
 static void moveToTendency(Unit& unit) {
 	Direction moveDir = directions[getTendency(unit)];
 	if (gc.is_move_ready(unit.get_id()) && gc.can_move(unit.get_id(), moveDir)) {
@@ -2227,6 +2364,20 @@ static int getMageAttackPriority(Unit& unit){
 	return 2;
 }
 
+// returns the priority of the unit for a knight to attack
+static int getKnightAttackPriority(Unit& unit){
+	if (unit.get_unit_type()==Rocket || unit.get_unit_type()==Factory){
+		return 0;
+	}
+	if (unit.get_unit_type()==Worker){
+		return 1;
+	}
+	if (unit.get_unit_type()==Knight){
+		return 3;
+	}
+	return 2;
+}
+
 // returns whether the unit attacked
 // Requriements: Make sure the Unit object is up to date!
 // I.e. you must call gc.get_unit() again if the ranger moves!
@@ -2253,26 +2404,114 @@ static bool rangerTryToAttack(Unit& unit) {
 		}
 		clock_t after_sense = clock();
 		ranger_attack_sense_stats.add(get_microseconds(before_sense, after_sense));
-		int whichToAttack = -1, whichToAttackHealth = 999, whichToAttackPriority = -1;
+
+		// units to attack. Stored as tuple of
+		// -- negative ranger attack priority (negative for sorting purposes)
+		// -- health
+		// -- index in units[]
+		vector<std::tuple<int, int, int>> to_attack;
+
 		for (int i = 0; i < units.size(); i++) {
 			const Unit &other = units[i];
 			if (other.get_team() != unit.get_team() && gc.can_attack(unit.get_id(), other.get_id())) {
 				int health = (int)other.get_health();
 				int attackPriority = (int) getRangerAttackPriority(other);
 
-				if (whichToAttack == -1 || (attackPriority>whichToAttackPriority) || (attackPriority==whichToAttackPriority && health < whichToAttackHealth)) {
-					whichToAttack = i;
-					whichToAttackPriority = attackPriority;
-					whichToAttackHealth = health;
+				to_attack.emplace_back(-attackPriority, health, i);
+			}
+		}
+
+		// sort highest priority units to the front
+		std::sort(to_attack.begin(), to_attack.end());
+
+		// do your first attack which is for free.
+		int to_attack_index = 0;
+		bool done_attack = false;
+		if (!to_attack.empty()) {
+			int enemy_index = std::get<2>(to_attack[0]);
+			gc.attack(unit.get_id(), units[enemy_index].get_id());
+			if (gc.can_sense_unit(units[enemy_index].get_id())) {
+				// enemy still alive, update unit health
+				units[enemy_index] = gc.get_unit(units[enemy_index].get_id());
+			} else {
+				// enemy killed
+				to_attack_index = 1;
+			}
+			done_attack = true;
+		}
+
+		// get all healers that have overcharge available that are in range
+		std::vector<std::pair<int, int>> available_overcharge_list;
+		get_available_overcharges_in_range(unit, available_overcharge_list);
+
+		// now go through all the enemies and if you can one shot them with overcharge, do it
+		bool overcharge_done = false;
+		int current_overcharge_index = 0;
+		int total_overcharges = int(available_overcharge_list.size());
+		for ( ; to_attack_index < int(to_attack.size()); to_attack_index++) {
+			const auto &tuple = to_attack[to_attack_index];
+			// check if we're out of overcharge
+			if (current_overcharge_index >= total_overcharges) {
+				break;
+			}
+
+			int enemy_index = std::get<2>(tuple);
+
+			// skip knights, they're not worth wasting overcharge on.
+			// NOTE: IF YOU DECIDE TO CHANGE THIS, THEN YOU MUST TAKE INTO ACCOUNT THE ENEMY
+			// KNIGHT UPGRADE LEVEL !!!!
+			// BECAUSE THIS WILL CHANGE HOW MANY ATTACKS IT TAKES TO ONE SHOT THEM!!!
+			// DON'T IGNORE THIS!!! ^^
+			if (units[enemy_index].get_unit_type() == Knight) {
+				continue;
+			}
+
+			// Warning: Constant being used (ranger attack damage)
+			int attacks_needed = (units[enemy_index].get_health() + 29) / 30;
+			if (attacks_needed <= total_overcharges - current_overcharge_index) {
+				for (int i = 0; i < attacks_needed; i++) {
+					if (doOvercharge(available_overcharge_list[current_overcharge_index], unit)) {
+						overcharge_done = true;
+					} else {
+						DEBUG_OUTPUT("Error: Bot thought that it could overcharge, but it couldn't!\n");
+						// overcharge failed, can't attack, just break rip
+						break;
+					}
+					current_overcharge_index++;
+
+					if (gc.can_attack(unit.get_id(), units[enemy_index].get_id())) {
+						gc.attack(unit.get_id(), units[enemy_index].get_id());
+					} else {
+						DEBUG_OUTPUT("Error: Ranger being overcharged thinks it can attack unit, but it can't!\n");
+						// Note: If this happens, it may be because the enemy unit object in units[enemy_index] was
+						// out of date before reaching this for loop. Make sure it's updated whenever it's attacked
+						// before reaching this for loop.
+
+						// rip, we somehow miscalculated the required number of attacks
+						// break so we don't waste any more overcharge on attacking this unit
+						break;
+					}
+				}
+
+				// check that we actually killed it
+				if (gc.can_sense_unit(units[enemy_index].get_id())) {
+					DEBUG_OUTPUT("Error: Ranger thought it one shot a unit with a bunch of overcharge, but it didnt!\n");
+				} else {
+					printf("Yay, one shot worked on unit at %d %d!\n", units[enemy_index].get_map_location().get_x(),
+						units[enemy_index].get_map_location().get_y());
 				}
 			}
 		}
-		if (whichToAttack != -1) {
-			gc.attack(unit.get_id(), units[whichToAttack].get_id());
-			return true;
+
+		if (overcharge_done) {
+			// if overcharge was done, put unit back into queue so they can do movement again
+			add_unit_to_all_my_units(gc.get_unit(unit.get_id()));
 		}
+
+		return done_attack;
+	} else {
+		return false;
 	}
-	return false;
 }
 
 // returns whether the unit attacked
@@ -2312,8 +2551,9 @@ static bool mageTryToAttack(Unit& unit) {
 				int kills = 0;
 				int attackPriority = 0;
 				// sum over area of effect
-				for (int y = std::max(0, loc.get_y() - 1); y <= std::min(height - 1, loc.get_y() + 1); y++) {
-					for (int x = std::max(0, loc.get_x() - 1); x <= std::min(width - 1, loc.get_x() + 1); x++) {
+				MapLocation theirLoc(unit.get_map_location());
+				for (int y = std::max(0, theirLoc.get_y() - 1); y <= std::min(height - 1, theirLoc.get_y() + 1); y++) {
+					for (int x = std::max(0, theirLoc.get_x() - 1); x <= std::min(width - 1, theirLoc.get_x() + 1); x++) {
 						if (hasEnemyUnit[y][x]) {
 							if (enemyUnitHealth[y][x] <= unit.get_damage()) {
 								kills++;
@@ -2337,6 +2577,40 @@ static bool mageTryToAttack(Unit& unit) {
 		}
 		if (whichToAttack != -1) {
 			gc.attack(unit.get_id(), units[whichToAttack].get_id());
+			vector<pair<int, int>> available_overcharge_list;
+			get_available_overcharges_in_range(unit, available_overcharge_list);
+			MapLocation theirLoc(units[whichToAttack].get_map_location());
+			while (!available_overcharge_list.empty() && gc.can_sense_unit(units[whichToAttack].get_id())) {
+				// is it worth requesting overcharge to go again?
+				bool worthAnOvercharge = false;
+				int kills = 0;
+				for (int y = std::max(0, theirLoc.get_y() - 1); y <= std::min(height - 1, theirLoc.get_y() + 1); y++) {
+					for (int x = std::max(0, theirLoc.get_x() - 1); x <= std::min(width - 1, theirLoc.get_x() + 1); x++) {
+						// take into account the damage just dealt
+						if (hasEnemyUnit[y][x]) {
+							enemyUnitHealth[y][x] -= unit.get_damage();
+							if (enemyUnitHealth[y][x] <= 0) {
+								hasEnemyUnit[y][x] = false;
+							}
+						}
+						if (hasEnemyUnit[y][x]) {
+							if (enemyUnitHealth[y][x] <= unit.get_damage()) {
+								kills++;
+							}
+						}
+					}
+				}
+				if (kills >= 3) {
+					worthAnOvercharge = true;
+				}
+				if (worthAnOvercharge) {
+					doOvercharge(available_overcharge_list.back(), unit);
+					available_overcharge_list.pop_back();
+					gc.attack(unit.get_id(), units[whichToAttack].get_id());
+				} else {
+					break;
+				}
+			}
 			return true;
 		}
 	}
@@ -2347,20 +2621,13 @@ static bool mageTryToAttack(Unit& unit) {
 // Requirements: The Unit object must have an up-to-date location and cooldowns.
 // Otherwise the healer won't heal even when it is able to
 // And the healer might incorrectly try to heal/overcharge, or waste time limit trying to when it can't
-static void tryToHealAndOvercharge(Unit& unit) {
+static void tryToHeal(Unit& unit) {
 	bool is_heal_ready = gc.is_heal_ready(unit.get_id());
 	// Only overcharges if the current round is an attack round
-	bool is_overcharge_ready =
-		has_overcharge_researched &&
-		unit.get_ability_heat() < 10 &&
-		is_attack_round;
-	if (unit.is_on_map() && (is_heal_ready || is_overcharge_ready)) {
+	if (unit.is_on_map() && is_heal_ready) {
 		// Warning: Constant being used (healer heal range)
-		// Warning: Constant being used (healer overcharge range)
-		// Currently heal range and overcharge range are the same. Need to change this if they change.
 		vector<Unit> units = gc.sense_nearby_units_by_team(unit.get_map_location(), 30, gc.get_team());
 		int whichToHeal = -1, whichToHealHealthMissing = -1;
-		int whichToOvercharge = -1, whichToOverchargeAttackHeat = -1;
 		for (int i = 0; i < units.size(); i++) {
 			const Unit &other = units[i];
 			// heal the unit with most health missing
@@ -2369,36 +2636,10 @@ static void tryToHealAndOvercharge(Unit& unit) {
 				whichToHeal = i;
 				whichToHealHealthMissing = healthMissing;
 			}
-			// overcharge a ranger within attack range of the enemy, and with the most attack heat
-			// if there's no ranger within attack range of the enemy, don't waste your overcharge! Just wait.
-			// TODO: add overcharging other units, e.g. mages
-			if (is_overcharge_ready) {
-				// Warning: constant being used (ranger attack range)
-				// TODO: does this crash if there are units in a garrison? Does sense unit get those units?
-				MapLocation other_loc = other.get_map_location();
-				if (other.get_unit_type() == Ranger && attackDistanceToEnemy[other_loc.get_y()][other_loc.get_x()] <= 50) {
-					if (whichToOvercharge == -1 || other.get_attack_heat() > whichToOverchargeAttackHeat) {
-						whichToOvercharge = i;
-						whichToOverchargeAttackHeat = other.get_attack_heat();
-					}
-				}
-			}
 		}
 		if (whichToHeal != -1 && whichToHealHealthMissing > 0) {
 			//System.out.println("Healer says: 'I'm being useful!'");
 			gc.heal(unit.get_id(), units[whichToHeal].get_id());
-		}
-		if (whichToOvercharge != -1 && whichToOverchargeAttackHeat >= 10) {
-			Unit other = units[whichToOvercharge];
-			if (other.is_on_map()) {
-				/*DEBUG_OUTPUT("healer at %d %d overcharging unit at %d %d\n", unit.get_map_location().get_x(), unit.get_map_location().get_y(),
-				  other.get_map_location().get_x(), other.get_map_location().get_y());*/
-				gc.overcharge(unit.get_id(), other.get_id());
-				add_unit_to_all_my_units(other);
-			} else {
-				DEBUG_OUTPUT("Error: Expected to be able to overcharge unit, but can't. "
-						"Probably because sense_nearby_units_by_team() returned a unit in a garrison.\n");
-			}
 		}
 	}
 }
@@ -2479,14 +2720,14 @@ static void tryToLoadRocket (Unit& unit) {
 
 	// bring along anything
 	fo(i, 0, SZ(loadableUnits)) {
+		if (loadableUnits[i].get_unit_type() == Mage) {
+			// almost useless on mars since no ranger front line
+			continue;
+		}
 		if (gc.can_load(unit.get_id(), loadableUnits[i].get_id())) {
 
-			// this code is bad because the rocket taking off kills the fucking worker anyway, so you may as well take it
-			/*
-			   if (loadableUnits[i].get_unit_type() == Worker && numWorkers <= 4) {
-			   continue;
-			   }
-			 */
+			if (loadableUnits[i].get_unit_type() == Worker && numWorkers <= 2) 
+				continue;
 
 			remove_type_from_friendly_unit_count(loadableUnits[i].get_unit_type());
 			gc.load(unit.get_id(), loadableUnits[i].get_id());
@@ -3482,14 +3723,14 @@ static void match_units_to_rockets (vector<Unit>& input_units) {
 		int ry = rocket.get_map_location().get_y();
 		int rx = rocket.get_map_location().get_x();
 
-		int healers_in_rocket = 0;
-		int workers_in_rocket = 0;
+		bool need_healer = true;
+		bool need_worker = true;
 
 		vector<unsigned> tmp_garrison = rocket.get_structure_garrison();
 		for (unsigned i : tmp_garrison)  {
 			UnitType tmp = gc.get_unit(i).get_unit_type();
-			healers_in_rocket += (tmp == Healer);
-			workers_in_rocket += (tmp == Worker);
+			if (tmp == Healer) need_healer = false;
+			if (tmp == Worker) need_worker = false;
 		}
 
 		int num_needed = int(rocket.get_structure_max_capacity() - tmp_garrison.size());
@@ -3522,8 +3763,7 @@ static void match_units_to_rockets (vector<Unit>& input_units) {
 		int c_worker = -1;
 
 		fo(i, 0, SZ(sorted_by_dist)) {
-			if (healers_in_rocket > 0 && workers_in_rocket > 0) {
-				break;
+			if (!need_healer && !need_worker) {
 				break;
 			}
 
@@ -3531,20 +3771,15 @@ static void match_units_to_rockets (vector<Unit>& input_units) {
 			UnitType type;
 			tie(ignore, id, type) = sorted_by_dist[i];
 
-			// don't bleed out of workers
-			if (numWorkers <= 2 && type == Worker) {
-				continue;
-			}
-
-			if (healers_in_rocket == 0 && type == Healer) {
-				healers_in_rocket++;
+			if (need_healer && type == Healer) {
+				need_healer = false;
 				num_needed--;
 				c_healer = id;
 				unit_summon[id] = make_pair(ry, rx);
 			}
 
-			if (workers_in_rocket == 0 && type == Worker) {
-				workers_in_rocket++;
+			if (need_worker && type == Worker) {
+				need_worker = false;
 				num_needed--;
 				c_worker = id;
 				unit_summon[id] = make_pair(ry, rx);
@@ -3565,22 +3800,6 @@ static void match_units_to_rockets (vector<Unit>& input_units) {
 				continue;
 			}
 
-			// don't bleed out of workers
-			if (numWorkers <= 2 && type == Worker) {
-				continue;
-			}
-
-			if (roundNum <= 700) {
-				// only specify unit types when you aren't in a huge rush
-				if (workers_in_rocket >= 3 && type == Worker) {
-					continue;
-				}
-
-				if (healers_in_rocket >= 2 && type == Healer) {
-					continue;
-				}
-			}
-
 			num_needed--;
 			unit_summon[id] = make_pair(ry, rx);
 		}
@@ -3596,20 +3815,4 @@ static bool try_summon_move (Unit& unit) {
 	} else {
 		return false;
 	}
-}
-
-static bool get_can_rocket () {
-	bool canRocket = (gc.get_research_info().get_level(Rocket) >= 1);
-
-	// already sent 2 early game
-	if (!raceToMars && num_rockets_sent >= 2) {
-		canRocket = false;
-	}
-
-	// not developed enough to sacrifice units
-	if (!raceToMars && (numRangers <= 20 || numIdleRangers == 0)) {
-		canRocket = false;
-	}
-
-	return canRocket;
 }
