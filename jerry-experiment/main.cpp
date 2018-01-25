@@ -21,10 +21,10 @@
 #define fo(i,a,b) for (int i=(a);i<(b);i++)
 #define SZ(a) ((int) a.size())
 
-#ifdef NOT_IN_DEBUG_MODE
+#ifdef NDEBUG
  #define DEBUG_OUTPUT(x...)
 #else
- #define DEBUG_OUTPUT(x...) printf(x...)
+ #define DEBUG_OUTPUT(x...) printf(x)
 #endif
 
 using namespace bc;
@@ -34,6 +34,7 @@ using namespace std::chrono;
 static int roundNum;
 
 static bool raceToMars = false;
+static bool can_rush_enemy = false;
 
 static int maxConcurrentRocketsReady = 2;
 
@@ -88,6 +89,8 @@ static bool hasEnemyUnit[55][55];
 static int enemyUnitHealth[55][55];
 static int enemyUnitId[55][55];
 
+static int friendlyKnightCount[55][55];
+
 // temporary seen array
 static bool bfs_seen[55][55];
 
@@ -109,7 +112,8 @@ static int randDirOrder[55];
 // factories that are currently blueprints
 static vector<Unit> factoriesBeingBuilt;
 static vector<Unit> rocketsBeingBuilt;
-static vector<Unit> rocketsReady;
+static vector<Unit> rockets_to_fill;
+static int num_rockets_sent;
 
 // team defs
 static Team myTeam;
@@ -167,6 +171,9 @@ static int numEnemiesThatCanAttackSquare[55][55];
 static int distToMyStartingLocs[55][55];
 static int distToEnemyStartingLocs[55][55];
 
+static int distToNearestEnemyFighter[55][55];
+static int distToNearestFriendlyFighter[55][55];
+
 static int numIdleRangers;
 static int numIdleMages;
 
@@ -210,6 +217,9 @@ static const int OneMoveFromMageAttackRange = 45;
 static int IsEnoughResourcesNearbySearchDist = 8;
 
 static int getClosestFreeGoodPositionCandidates[50 * 50 + 5];
+
+// rocket summoning: mapping unit id to target rocket
+static map<int, pair<int, int>> unit_summon;
 
 // stats about quantities of friendly units
 static int numWorkers;
@@ -264,12 +274,13 @@ static bool moveToAttackLocs (Unit& unit);
 
 static MapLocation getRandomMapLocation(Planet p, const MapLocation &giveUp);
 static void moveToTendency(Unit& unit);
-static int getRangerAttackPriority(Unit& unit);
+static int getRangerAttackPriority(const Unit& unit);
 static int getMageAttackPriority(Unit& unit);
 static bool rangerTryToAttack(Unit& unit);
 static bool mageTryToAttack(Unit& unit);
 static void tryToHealAndOvercharge(Unit& unit);
 static void multisourceBfsAvoidingUnitsAndDanger (vector<SimpleState>& startingLocs, int resultArr[55][55]);
+static void multisourceBfsAvoidingNothing (vector<SimpleState>& startingLocs, int resultArr[55][55]);
 static bool doReplicate(Unit& unit);
 static void checkForEnemyUnits (vector<Unit>& allUnits);
 
@@ -282,15 +293,21 @@ static bool doBuild(Unit& unit);
 static bool doBlueprint(Unit& unit, UnitType toBlueprint);
 static bool doRepair(Unit& unit);
 static bool isEnoughResourcesNearby(Unit& unit);
+static std::tuple<int,int,int> factoryGetNearbyStuff(Unit& unit);
 static bool tryMoveToLoc (Unit& unit, int distArray[55][55]);
 static void tryToLoadRocket (Unit& unit);
 static pair<int,int> get_closest_good_position (int y, int x, bool taken_array[55][55], vector<pair<int, int>>& good_list);
 static int get_dir_index (Direction dir);
 static bool will_blueprint_create_blockage(MapLocation loc);
 static int shortRangeBfsToBestKarbonite(Unit &unit);
+static bool knight_bfs_to_enemy_unit(Unit &unit);
 
-static void doBlueprintMovement(Unit &unit, bool &doneMovement);
-static void doKarboniteMovement(Unit &unit, bool &doneMovement);
+static void doBlueprintMovement(Unit &unit, bool &doneMove);
+static void doKarboniteMovement(Unit &unit, bool &doneMove);
+
+static void match_units_to_rockets (vector<Unit>& input_units);
+static bool try_summon_move (Unit& unit);
+static bool get_can_rocket ();
 
 static inline int distance_squared(int dy, int dx) {
 	return dy * dy + dx * dx;
@@ -321,7 +338,7 @@ static void add_unit_to_all_my_units (const Unit &unit) {
 }
 
 static int get_dir_index (Direction dir) {
-	fo(i, 0, 8) if (directions[i] == dir) {
+	fo(i, 0, 9) if (directions[i] == dir) {
 		return i;
 	}
 	DEBUG_OUTPUT("ERROR: Couldn't find dir index for %d\n", dir);
@@ -384,9 +401,6 @@ int main() {
 	init_global_variables();
 	DEBUG_OUTPUT("Finished init_global_variables()\n");
 
-	reach_enemy_result = can_reach_enemy_on_earth();
-	DEBUG_OUTPUT("reach_enemy_result: %d\n",reach_enemy_result);
-
 	if (myPlanet == Mars) {
 		while (true) {
 			// DEBUG_OUTPUT("Starting round %d\n", roundNum);
@@ -445,39 +459,41 @@ int main() {
 			roundNum++;
 		}
 	} else {
-		/*gc.queue_research(Worker);
+		gc.queue_research(Worker);
 		gc.queue_research(Ranger);
 		gc.queue_research(Healer);
-		gc.queue_research(Healer);
-		gc.queue_research(Healer);
-		gc.queue_research(Ranger);
-		gc.queue_research(Worker);
-		gc.queue_research(Worker);
 		gc.queue_research(Rocket);
+		gc.queue_research(Healer);
+		gc.queue_research(Healer);
+		gc.queue_research(Ranger);
+		gc.queue_research(Worker);
+		gc.queue_research(Worker);
 		gc.queue_research(Worker);
 		gc.queue_research(Rocket);
 		// Currently this last rocket upgrade is useless because we get it on round 750 xd.
 		// But whatever 4Head.
 		gc.queue_research(Rocket);
-		*/
-		gc.queue_research(Worker);
-		gc.queue_research(Ranger);
-		gc.queue_research(Healer);
-		gc.queue_research(Rocket); // get on mars early
-		gc.queue_research(Mage);
-		gc.queue_research(Mage);
-		gc.queue_research(Mage);
-		gc.queue_research(Mage);   // blink mages
-		gc.queue_research(Healer);
-		gc.queue_research(Healer); // overcharge
-		gc.queue_research(Ranger);
-		gc.queue_research(Ranger); // snipe
-		gc.queue_research(Worker);
+		/*gc.queue_research(Worker);
+		  gc.queue_research(Ranger);
+		  gc.queue_research(Healer);
+		  gc.queue_research(Healer);
+		  gc.queue_research(Healer); // overcharge
+		  gc.queue_research(Ranger);
+		  gc.queue_research(Worker);*/
+
+		gc.queue_research(Rocket);
 
 		int total_time = 0;
 		int prev_time_left_ms = gc.get_time_left_ms();
 		clock_t prev_time = clock();
 		high_resolution_clock::time_point prev_point = high_resolution_clock::now();
+
+		reach_enemy_result = can_reach_enemy_on_earth();
+		DEBUG_OUTPUT("reach_enemy_result: %d\n",reach_enemy_result);
+
+		if (reach_enemy_result == CANT_REACH_ENEMY) {
+			start_racing_to_mars();
+		}
 
 		while (true) {
 			//DEBUG_OUTPUT("\n======================\nStarting round %d\n", roundNum);
@@ -485,19 +501,19 @@ int main() {
 				DEBUG_OUTPUT("Warning: Running out of time! Skipping turn! (Less than 300 ms left.)\n");
 			} else {
 				/*int cur_time_left_ms = gc.get_time_left_ms();
-				clock_t cur_time = clock();
-				high_resolution_clock::time_point cur_point = high_resolution_clock::now();
-				static const int extra_time_per_round_ms = 25;
-				DEBUG_OUTPUT("time left (milliseconds): %d\n", cur_time_left_ms);
-				DEBUG_OUTPUT(" gc time             (milliseconds) used last round (with correction) = %6d\n", int(prev_time_left_ms - cur_time_left_ms) + extra_time_per_round_ms);
-				DEBUG_OUTPUT("  c time  (cpu time) (MICROseconds) used last round                   = %6d\n", get_microseconds(prev_time, cur_time));
-				std::cout << "c++ time (real time) (MICROseconds) used last round                   = " << std::setw(6) << (int)duration_cast<microseconds>(cur_point - prev_point).count() << std::endl;
-				DEBUG_OUTPUT("\n");
-				total_time += (int)duration_cast<milliseconds>(cur_point - prev_point).count();
-				DEBUG_OUTPUT("total time for the game so far (milliseconds) = %d\n", total_time);
-				prev_time_left_ms = cur_time_left_ms;
-				prev_time = cur_time;
-				prev_point = cur_point;*/
+				  clock_t cur_time = clock();
+				  high_resolution_clock::time_point cur_point = high_resolution_clock::now();
+				  static const int extra_time_per_round_ms = 25;
+				  DEBUG_OUTPUT("time left (milliseconds): %d\n", cur_time_left_ms);
+				  DEBUG_OUTPUT(" gc time             (milliseconds) used last round (with correction) = %6d\n", int(prev_time_left_ms - cur_time_left_ms) + extra_time_per_round_ms);
+				  DEBUG_OUTPUT("  c time  (cpu time) (MICROseconds) used last round                   = %6d\n", get_microseconds(prev_time, cur_time));
+				  std::cout << "c++ time (real time) (MICROseconds) used last round                   = " << std::setw(6) << (int)duration_cast<microseconds>(cur_point - prev_point).count() << std::endl;
+				  DEBUG_OUTPUT("\n");
+				  total_time += (int)duration_cast<milliseconds>(cur_point - prev_point).count();
+				  DEBUG_OUTPUT("total time for the game so far (milliseconds) = %d\n", total_time);
+				  prev_time_left_ms = cur_time_left_ms;
+				  prev_time = cur_time;
+				  prev_point = cur_point;*/
 
 				TimeStats get_unit_stats("Getting units from allMyUnits");
 				TimeStats ranger_stats("Ranger");
@@ -513,16 +529,19 @@ int main() {
 				queue_pop_stats.clear();
 
 				clock_t before_init_turn = clock();
-
 				vector<Unit> units = gc.get_my_units();
 				init_turn(units);
+				clock_t after_init_turn = clock();
+				// DEBUG_OUTPUT("  pre-turn setup took %6d microseconds\n", get_microseconds(before_init_turn, after_init_turn));
 
-				if (roundNum >= 400) {
+				clock_t before_matching_to_rockets = clock();
+				match_units_to_rockets(units);
+				clock_t after_matching_to_rockets = clock();
+				// DEBUG_OUTPUT("  matching units to rockets took %6d microseconds\n", get_microseconds(before_init_turn, after_init_turn));
+
+				if (roundNum >= 600) {
 					start_racing_to_mars();
 				}
-				clock_t after_init_turn = clock();
-
-				//DEBUG_OUTPUT("  pre-turn setup took %6d microseconds\n", get_microseconds(before_init_turn, after_init_turn));
 
 				clock_t before_units = clock();
 
@@ -607,19 +626,25 @@ int main() {
 
 				// Stats section 3: printing
 				/*
-				get_unit_stats.print();
-				queue_pop_stats.print();
-				*/
+				   get_unit_stats.print();
+				   queue_pop_stats.print();
+				 */
 				/*ranger_stats.print();
-				healer_stats.print();
-				worker_stats.print();
-				factory_stats.print();
-				rocket_stats.print();
-				ranger_attack_stats.print();
-				ranger_attack_sense_stats.print();*/
+				  healer_stats.print();
+				  worker_stats.print();
+				  factory_stats.print();
+				  rocket_stats.print();
+				  ranger_attack_stats.print();
+				  ranger_attack_sense_stats.print();*/
 				//gc_get_unit_stats.print();
 
-				//DEBUG_OUTPUT("Number of idle rangers is %3d / %3d\n", numIdleRangers, numRangers);
+
+				// arbitrary system!!
+				if (numIdleRangers > numRangers / 3 && numRangers > 50) {
+					start_racing_to_mars();
+				}
+
+				// DEBUG_OUTPUT("Number of idle rangers is %3d / %3d\n", numIdleRangers, numRangers);
 			}
 
 			fflush(stdout);
@@ -630,6 +655,7 @@ int main() {
 }
 
 static void init_turn (vector<Unit>& myUnits) {
+	unit_summon.clear();
 
 	for (int i = 0; i < height; i++) {
 		for (int j = 0; j < width; j++) {
@@ -669,6 +695,7 @@ static void init_turn (vector<Unit>& myUnits) {
 			isSquareDangerous[y][x] = false;
 			numEnemiesThatCanAttackSquare[y][x] = 0;
 			mageAttackPriorities[y][x] = 0;
+			friendlyKnightCount[y][x] = 0;
 
 			time_since_damaged_unit[y][x]++;
 			is_good_healer_position[y][x] = false;
@@ -706,9 +733,11 @@ static void init_turn (vector<Unit>& myUnits) {
 	numIdleRangers = 0;
 	numIdleMages = 0;
 
-	rocketsReady.clear();
+	rockets_to_fill.clear();
 
 	vector<SimpleState> damagedFriendlyHealableUnits;
+	vector<SimpleState> enemyFighters;
+	vector<SimpleState> friendlyFighters;
 	vector<Unit> units = gc.get_units();
 
 	fo(i, 0, SZ(units)) {
@@ -736,9 +765,17 @@ static void init_turn (vector<Unit>& myUnits) {
 					damagedFriendlyHealableUnits.push_back(SimpleState(locY, locX));
 				}
 
+				if (is_fighter_unit_type(unit.get_unit_type())) {
+					friendlyFighters.push_back(SimpleState(loc.get_y(), loc.get_x()));
+				}
+
 				// worker cache position
 				if (unit.get_unit_type() == Worker) {
 					hasFriendlyWorker[loc.get_y()][loc.get_x()] = true;
+				}
+
+				if (unit.get_unit_type() == Knight) {
+					friendlyKnightCount[loc.get_y()][loc.get_x()]++;
 				}
 			}
 
@@ -757,7 +794,7 @@ static void init_turn (vector<Unit>& myUnits) {
 				if (unit.structure_is_built() != 0) {
 
 					if (unit.get_structure_garrison().size() < unit.get_structure_max_capacity()) {
-						rocketsReady.push_back(unit);
+						rockets_to_fill.push_back(unit);
 					}
 
 					numRockets++;
@@ -783,6 +820,8 @@ static void init_turn (vector<Unit>& myUnits) {
 					// we've seen an enemy, mark as not the very early game anymore
 					is_very_early_game = false;
 
+					enemyFighters.push_back(SimpleState(locY, locX));
+
 					for (int y = locY - 10; y <= locY + 10; y++) {
 						if (y < 0 || height <= y) continue;
 						for (int x = locX - 10; x <= locX + 10; x++) {
@@ -796,6 +835,13 @@ static void init_turn (vector<Unit>& myUnits) {
 					}
 				}
 			}
+		}
+	}
+
+	// calculate dangerous squares
+	for (int y = 0; y < height; y++) for (int x = 0; x < width; x++) {
+		if (attackDistanceToEnemy[y][x] <= DangerDistanceThreshold) {
+			isSquareDangerous[y][x] = true;
 		}
 	}
 
@@ -826,20 +872,6 @@ static void init_turn (vector<Unit>& myUnits) {
 	//DEBUG_OUTPUT("%d good healer positions\n", SZ(good_healer_positions));
 
 	// calculate good positions
-	good_ranger_positions.clear();
-	for (int y = 0; y < height; y++) for (int x = 0; x < width; x++) {
-		if (RangerAttackRange < attackDistanceToEnemy[y][x] && attackDistanceToEnemy[y][x] <= OneMoveFromRangerAttackRange) {
-			is_good_ranger_position[y][x] = true;
-			good_ranger_positions.push_back(make_pair(y, x));
-			//System.out.println("good position at " + y + " " + x);
-		}
-
-		// also calculate dangerous squares
-		if (attackDistanceToEnemy[y][x] <= DangerDistanceThreshold) {
-			isSquareDangerous[y][x] = true;
-		}
-	}
-	//DEBUG_OUTPUT("Number of good ranger positions: %d\n", int(good_ranger_positions.size()));
 
 	good_mage_positions.clear();
 	fo(y, 0, height) fo(x, 0, width) {
@@ -875,6 +907,27 @@ static void init_turn (vector<Unit>& myUnits) {
 	// calculate distances to damaged healable friendly units
 	multisourceBfsAvoidingUnitsAndDanger(damagedFriendlyHealableUnits, distToDamagedFriendlyHealableUnit);
 
+	// calculate distances to nearest friendly and enemy fighter units
+	multisourceBfsAvoidingNothing(enemyFighters, distToNearestEnemyFighter);
+	multisourceBfsAvoidingNothing(friendlyFighters, distToNearestFriendlyFighter);
+
+	// Calculate good ranger positions
+	// Don't include:
+	// 1) impassable terrain
+	// 2) "good ranger positions" that are closer to enemy units than to ours
+	//    (This gets rid of those "unreachable", misleading "good positions" that are on the other side of their army)
+	good_ranger_positions.clear();
+	for (int y = 0; y < height; y++) for (int x = 0; x < width; x++) {
+		if (RangerAttackRange < attackDistanceToEnemy[y][x] && attackDistanceToEnemy[y][x] <= OneMoveFromRangerAttackRange &&
+				distToNearestEnemyFighter[y][x] >= distToNearestFriendlyFighter[y][x] &&
+				isPassable[y][x]) {
+			is_good_ranger_position[y][x] = true;
+			good_ranger_positions.push_back(make_pair(y, x));
+			//System.out.println("good position at " + y + " " + x);
+		}
+	}
+	//DEBUG_OUTPUT("Number of good ranger positions: %d\n", int(good_ranger_positions.size()));
+
 	// attackLoc update
 	checkForEnemyUnits(units);
 
@@ -900,13 +953,15 @@ static void start_racing_to_mars () {
 		return;
 	}
 
+
+	DEBUG_OUTPUT("Round %d: we start racing to Mars!\n", roundNum);
 	raceToMars = true;
 	maxConcurrentRocketsReady = 5;
 }
 
 static void init_global_variables () {
 
-	fo(i, 0, 8) directions.push_back((Direction) i);
+	fo(i, 0, 9) directions.push_back((Direction) i);
 
 	roundNum = 1;
 	EarthMap = gc.get_earth_map();
@@ -975,6 +1030,14 @@ static void init_global_variables () {
 	for (int i = 0;i <= 8;i++) {
 		random_shuffle(goodRocketLandingLocations[i].begin(), goodRocketLandingLocations[i].end());
 	}
+
+	int min_dist_to_enemy = 1000*1000;
+	for (auto i : myStartingUnits) {
+		for (auto j : enemyStartingUnits) {
+			min_dist_to_enemy = min(min_dist_to_enemy, dis[i.y][i.x][j.y][j.x]);
+		}
+	}
+	can_rush_enemy = (min_dist_to_enemy <= 15);
 }
 
 int get_unit_order_priority (const Unit& unit) {
@@ -1090,8 +1153,8 @@ static void doMoveRobot (Unit& unit, Direction dir) {
 			return;
 		}
 		/*hasFriendlyUnit[loc.get_y()][loc.get_x()] = false;
-		MapLocation next_loc = loc.add(dir);
-		hasFriendlyUnit[next_loc.get_y()][next_loc.get_x()] = true;*/
+		  MapLocation next_loc = loc.add(dir);
+		  hasFriendlyUnit[next_loc.get_y()][next_loc.get_x()] = true;*/
 		gc.move_robot(unit.get_id(), dir);
 	}
 }
@@ -1133,10 +1196,14 @@ static void runEarthWorker (Unit& unit) {
 		}
 	}
 
-	bool doneMovement = !gc.is_move_ready(unit.get_id());
+	bool doneMove = !gc.is_move_ready(unit.get_id());
+
+	if (!doneMove && try_summon_move(unit)) {
+		doneMove = true;
+	}
 
 	// movement
-	if (!doneMovement && false /* need to place factory and no adjacent good places and nearby good place */) {
+	if (!doneMove && false /* need to place factory and no adjacent good places and nearby good place */) {
 		// move towards good place
 	}
 	// If it's early game and you're a currently replicating worker, prioritize karbonite over blueprints
@@ -1146,24 +1213,24 @@ static void runEarthWorker (Unit& unit) {
 	// actually finished, and then your building bots would bug out. Example map: secretgarden
 	// Warning: constant used (replicate cooldown in #rounds)
 	if (is_very_early_game && roundNum < 50 && unit.get_ability_heat() < 20) {
-		doKarboniteMovement(unit, doneMovement);
-		doBlueprintMovement(unit, doneMovement);
+		doKarboniteMovement(unit, doneMove);
+		doBlueprintMovement(unit, doneMove);
 	} else {
-		doBlueprintMovement(unit, doneMovement);
-		doKarboniteMovement(unit, doneMovement);
+		doBlueprintMovement(unit, doneMove);
+		doKarboniteMovement(unit, doneMove);
 	}
-	if (!doneMovement /* next to damaged structure */) {
+	if (!doneMove /* next to damaged structure */) {
 		// done, stay next to damaged structure
 
 		// TODO: implement this
 	}
-	if (!doneMovement /* damaged structure */) {
+	if (!doneMove /* damaged structure */) {
 		// move towards damaged structure
 
 		// TODO: implement this
 	}
 
-	if (!doneMovement) {
+	if (!doneMove) {
 		// otherwise move randomly to a not-dangerous square
 		shuffleDirOrder();
 		for (int i = 0; i < 8; i++) {
@@ -1189,8 +1256,8 @@ static void runEarthWorker (Unit& unit) {
 	bool replicateForBuilding = (numFactories + numFactoryBlueprints > 0 && numWorkers < 6);
 	bool replicateForHarvesting = distToKarbonite[loc.get_y()][loc.get_x()] < IsEnoughResourcesNearbySearchDist && isEnoughResourcesNearby(unit);
 
-	bool canRocket = (gc.get_research_info().get_level(Rocket) >= 1);
-	bool lowRockets = ((int) rocketsReady.size() + numRocketBlueprints < maxConcurrentRocketsReady);
+	bool canRocket = get_can_rocket();
+	bool lowRockets = ((int) rockets_to_fill.size() + numRocketBlueprints < maxConcurrentRocketsReady);
 	bool needToSave = (gc.get_karbonite() < 75 + 15);
 
 	bool shouldReplicate = (replicateForBuilding || replicateForHarvesting);
@@ -1267,18 +1334,18 @@ static void runEarthWorker (Unit& unit) {
 
 static void runMarsWorker (Unit& unit) {
 
-	bool doneMovement = !gc.is_move_ready(unit.get_id());
+	bool doneMove = !gc.is_move_ready(unit.get_id());
 
-	if (!doneMovement) {
+	if (!doneMove) {
 		// move towards karbonite
 		MapLocation loc = unit.get_map_location();
 		if (distToKarbonite[loc.get_y()][loc.get_x()] != MultisourceBfsUnreachableMax) {
 			tryMoveToLoc(unit, distToKarbonite);
-			doneMovement = true;
+			doneMove = true;
 		}
 	}
 
-	if (!doneMovement) {
+	if (!doneMove) {
 		// otherwise move randomly to a not-dangerous square
 		shuffleDirOrder();
 		for (int i = 0; i < 8; i++) {
@@ -1367,6 +1434,7 @@ static void runEarthRocket (Unit& unit) {
 		}
 
 		gc.launch_rocket(unit.get_id(), where);
+		num_rockets_sent++;
 	}
 }
 
@@ -1385,19 +1453,32 @@ static void runFactory (Unit& unit) {
 	MapLocation loc = unit.get_map_location();
 
 	// TODO: change proportion based on current research levels
-	if (isSquareDangerous[loc.get_y()][loc.get_x()]) {
-		// dangerous square. Just build rangers, healers will just get instantly killed.
-		unitTypeToBuild = Ranger;
-	} else if (numWorkers == 0) {
-		unitTypeToBuild = Worker;
-	} else if (numRangers >= 2 * numHealers + 4) {
-		unitTypeToBuild = Healer;
-	} else if (has_blink_researched && numHealers >= 2 * numMages + 4) {
-		unitTypeToBuild = Mage;
+	// Don't check for knights past round 150 to save time or something
+	bool done_choice = false;
+	if (roundNum <= 150) {
+		// danger units = fighting units or factories
+		int enemyFactories, friendlyK, enemyK;
+		std::tie(enemyFactories, friendlyK, enemyK) = factoryGetNearbyStuff(unit);
+		if (can_rush_enemy || friendlyK < enemyK || (enemyFactories > 0 && friendlyK <= enemyK)) {
+			unitTypeToBuild = Knight;
+			done_choice = true;
+		}
+	}
+	if (!done_choice) {
+		if (numWorkers == 0) {
+			unitTypeToBuild = Worker;
+		} else if (isSquareDangerous[loc.get_y()][loc.get_x()]) {
+			// dangerous square. Just build rangers, healers will just get instantly killed.
+			unitTypeToBuild = Ranger;
+		} else if (numRangers >= 2 * numHealers + 4) {
+			unitTypeToBuild = Healer;
+		} else if (has_blink_researched && numHealers >= 2 * numMages + 4) {
+			unitTypeToBuild = Mage;
+		}
 	}
 
-	bool canRocket = (gc.get_research_info().get_level(Rocket) >= 1);
-	bool lowRockets = ((int) rocketsReady.size() + numRocketBlueprints < maxConcurrentRocketsReady);
+	bool canRocket = get_can_rocket();
+	bool lowRockets = ((int) rockets_to_fill.size() + numRocketBlueprints < maxConcurrentRocketsReady);
 	int unitCost = (unitTypeToBuild == Worker ? 25 : 20);
 	bool needToSave = (gc.get_karbonite() < 75 + unitCost);
 
@@ -1425,6 +1506,11 @@ static void runRanger (Unit& unit) {
 	// decide movement
 	if (unit.is_on_map() && gc.is_move_ready(unit.get_id())) {
 		bool doneMove = false;
+
+		if (!doneMove && try_summon_move(unit)) {
+			doneMove = true;
+		}
+
 		int myY = unit.get_map_location().get_y();
 		int myX = unit.get_map_location().get_x();
 
@@ -1533,12 +1619,6 @@ static void runRanger (Unit& unit) {
 		if (!doneMove) {
 			// otherwise, search for a good destination to move towards
 
-			if (raceToMars && !rocketsReady.empty()) {
-				doneMove = true;
-
-				tryToMoveToRocket(unit);
-			}
-
 			// check if current location is good position
 			if (!doneMove && is_good_ranger_position[myY][myX]) {
 				doneMove = true;
@@ -1630,6 +1710,11 @@ static void runMage (Unit& unit) {
 	// decide movement
 	if (unit.is_on_map() && gc.is_move_ready(unit.get_id())) {
 		bool doneMove = false;
+
+		if (!doneMove && try_summon_move(unit)) {
+			doneMove = true;
+		}
+
 		int myY = unit.get_map_location().get_y();
 		int myX = unit.get_map_location().get_x();
 
@@ -1761,12 +1846,6 @@ static void runMage (Unit& unit) {
 		if (!doneMove) {
 			// otherwise, search for a good destination to move towards
 
-			if (raceToMars && !rocketsReady.empty()) {
-				doneMove = true;
-
-				tryToMoveToRocket(unit);
-			}
-
 			// check if current location is good position
 			if (!doneMove && is_good_mage_position[myY][myX]) {
 				doneMove = true;
@@ -1842,19 +1921,34 @@ static void runMage (Unit& unit) {
 	}
 }
 
-static void runKnight(Unit& unit) {
+static void runKnight (Unit& unit) {
 	bool doneMove = false;
 
-	if (unit.is_on_map()) {
+	if (!doneMove && try_summon_move(unit)) {
+		doneMove = true;
+	}
+
+	if (unit.is_on_map() && gc.is_attack_ready(unit.get_id())) {
 		vector<Unit> units = gc.sense_nearby_units(unit.get_map_location(), unit.get_attack_range());
+		int whichToAttack = -1;
+		int whichToAttackPriority = -1;
+		int whichToAttackHealth = 9999;
 		for (int i = 0; i < units.size(); i++) {
-			Unit other = units[i];
+			const Unit &other = units[i];
 			if (other.get_team() != unit.get_team() && gc.can_attack(unit.get_id(), other.get_id())) {
-				doneMove = true;
-				if (gc.is_attack_ready(unit.get_id())) {
-					gc.attack(unit.get_id(), other.get_id());
+				int health = (int)other.get_health();
+				// ranger attack prority in knight code LuL
+				int attackPriority = (int) getRangerAttackPriority(other);
+
+				if (whichToAttack == -1 || (attackPriority>whichToAttackPriority) || (attackPriority==whichToAttackPriority && health < whichToAttackHealth)) {
+					whichToAttack = i;
+					whichToAttackPriority = attackPriority;
+					whichToAttackHealth = health;
 				}
 			}
+		}
+		if (whichToAttack != -1) {
+			gc.attack(unit.get_id(), units[whichToAttack].get_id());
 		}
 	}
 
@@ -1877,6 +1971,9 @@ static void runKnight(Unit& unit) {
 			}
 			}
 			 */
+			if (knight_bfs_to_enemy_unit(unit)) {
+				doneMove = true;
+			}
 		}
 
 		if (!doneMove) {
@@ -1897,8 +1994,8 @@ static void runHealer (Unit& unit) {
 	tryToHealAndOvercharge(unit);
 	bool doneMove = false;
 
-	if (raceToMars && !doneMove) {
-		doneMove = tryToMoveToRocket(unit);
+	if (!doneMove && try_summon_move(unit)) {
+		doneMove = true;
 	}
 
 	MapLocation loc = unit.get_map_location();
@@ -1936,7 +2033,7 @@ static void runHealer (Unit& unit) {
 static bool tryToMoveToRocket (Unit& unit ) {
 	// try to get to a fucking rocket as soon as possible
 
-	if (rocketsReady.empty()) {
+	if (rockets_to_fill.empty()) {
 		return false;
 	}
 
@@ -1947,7 +2044,7 @@ static bool tryToMoveToRocket (Unit& unit ) {
 	int bestToY = -1;
 	int bestToX = -1;
 
-	for (Unit u : rocketsReady) {
+	for (Unit u : rockets_to_fill) {
 		int toY = u.get_map_location().get_y();
 		int toX = u.get_map_location().get_x();
 
@@ -2103,7 +2200,7 @@ static void moveToTendency(Unit& unit) {
 }
 
 // returns the priority of the unit for a ranger to attack
-static int getRangerAttackPriority(Unit& unit){
+static int getRangerAttackPriority(const Unit& unit){
 	if (unit.get_unit_type()==Rocket || unit.get_unit_type()==Factory){
 		return 0;
 	}
@@ -2158,7 +2255,7 @@ static bool rangerTryToAttack(Unit& unit) {
 		ranger_attack_sense_stats.add(get_microseconds(before_sense, after_sense));
 		int whichToAttack = -1, whichToAttackHealth = 999, whichToAttackPriority = -1;
 		for (int i = 0; i < units.size(); i++) {
-			Unit other = units[i];
+			const Unit &other = units[i];
 			if (other.get_team() != unit.get_team() && gc.can_attack(unit.get_id(), other.get_id())) {
 				int health = (int)other.get_health();
 				int attackPriority = (int) getRangerAttackPriority(other);
@@ -2222,6 +2319,11 @@ static bool mageTryToAttack(Unit& unit) {
 								kills++;
 							}
 							attackPriority += mageAttackPriorities[y][x];
+						}
+						if (y == loc.get_y() && x == loc.get_x()) {
+							// dont shoot yourself
+							kills = -420420;
+							attackPriority = -420420;
 						}
 					}
 				}
@@ -2290,12 +2392,12 @@ static void tryToHealAndOvercharge(Unit& unit) {
 			Unit other = units[whichToOvercharge];
 			if (other.is_on_map()) {
 				/*DEBUG_OUTPUT("healer at %d %d overcharging unit at %d %d\n", unit.get_map_location().get_x(), unit.get_map_location().get_y(),
-					other.get_map_location().get_x(), other.get_map_location().get_y());*/
+				  other.get_map_location().get_x(), other.get_map_location().get_y());*/
 				gc.overcharge(unit.get_id(), other.get_id());
 				add_unit_to_all_my_units(other);
 			} else {
 				DEBUG_OUTPUT("Error: Expected to be able to overcharge unit, but can't. "
-					"Probably because sense_nearby_units_by_team() returned a unit in a garrison.\n");
+						"Probably because sense_nearby_units_by_team() returned a unit in a garrison.\n");
 			}
 		}
 	}
@@ -2379,8 +2481,12 @@ static void tryToLoadRocket (Unit& unit) {
 	fo(i, 0, SZ(loadableUnits)) {
 		if (gc.can_load(unit.get_id(), loadableUnits[i].get_id())) {
 
-			if (loadableUnits[i].get_unit_type() == Worker && numWorkers <= 2) 
-				continue;
+			// this code is bad because the rocket taking off kills the fucking worker anyway, so you may as well take it
+			/*
+			   if (loadableUnits[i].get_unit_type() == Worker && numWorkers <= 4) {
+			   continue;
+			   }
+			 */
 
 			remove_type_from_friendly_unit_count(loadableUnits[i].get_unit_type());
 			gc.load(unit.get_id(), loadableUnits[i].get_id());
@@ -2481,6 +2587,40 @@ static void multisourceBfsAvoidingUnitsAndDanger (vector<SimpleState>& startingL
 			int nx = cur.x + dx[d];
 			if (0 <= ny && ny < height && 0 <= nx && nx < width &&
 					isPassable[ny][nx] && !isSquareDangerous[ny][nx] && resultArr[ny][nx] == MultisourceBfsUnreachableMax) {
+				resultArr[ny][nx] = resultArr[cur.y][cur.x] + 1;
+
+				// if the next square has a friendly unit, mark down the distance to that square but don't continue the bfs
+				// through that square
+				//if (!hasFriendlyUnit[ny][nx])
+
+				q.push(SimpleState(ny, nx));
+			}
+		}
+	}
+}
+
+// Copied from multisourceBfsAvoidingUnitsAndDanger,
+// except that we pass through everything *including* passing through impassable terrain
+static void multisourceBfsAvoidingNothing (vector<SimpleState>& startingLocs, int resultArr[55][55]) {
+	for (int y = 0; y < height; y++) for (int x = 0; x < width; x++) {
+		resultArr[y][x] = MultisourceBfsUnreachableMax;
+	}
+	queue<SimpleState> q;
+
+	for (int i = 0; i < startingLocs.size(); i++) {
+		SimpleState loc = startingLocs[i];
+		resultArr[loc.y][loc.x] = 0;
+		q.push(SimpleState(loc.y, loc.x));
+	}
+
+	while (!q.empty()) {
+		SimpleState cur = q.front();
+		q.pop();
+
+		for (int d = 0; d < 8; d++) {
+			int ny = cur.y + dy[d];
+			int nx = cur.x + dx[d];
+			if (0 <= ny && ny < height && 0 <= nx && nx < width && resultArr[ny][nx] == MultisourceBfsUnreachableMax) {
 				resultArr[ny][nx] = resultArr[cur.y][cur.x] + 1;
 
 				// if the next square has a friendly unit, mark down the distance to that square but don't continue the bfs
@@ -2658,7 +2798,7 @@ static bool doBuild(Unit& unit) {
 
 		// If it's complete, remove it from the factoriesBeingBuilt list
 		// need to re-sense the unit to get the updated structure_is_built() value
-		
+
 		// Don't need to add new object to allMyUnits, because we can just use the existing object
 		// (even though it will be out of date now that the factory is complete, it'll still work if we just
 		// don't check whether structure_is_built() in runFactory())
@@ -2677,7 +2817,7 @@ static bool doBuild(Unit& unit) {
 			} else {
 				for (int j = 0; j < rocketsBeingBuilt.size(); j++) {
 					if (rocketsBeingBuilt[j].get_map_location() == other.get_map_location()) {
-						rocketsReady.push_back(other);
+						rockets_to_fill.push_back(other);
 						rocketsBeingBuilt.erase(rocketsBeingBuilt.begin()+j);
 						foundIt = true;
 						break;
@@ -2738,9 +2878,9 @@ static bool isEnoughResourcesNearby(Unit& unit) {
 		for (int x = max(locX - IsEnoughResourcesNearbySearchDist, 0); x <= min(locX + IsEnoughResourcesNearbySearchDist, width - 1); x++) {
 			if (dis[locY][locX][y][x] <= IsEnoughResourcesNearbySearchDist) {
 				nearbyKarbonite += lastKnownKarboniteAmount[y][x];
-			}
-			if (hasFriendlyWorker[y][x]) {
-				nearbyWorkers++;
+				if (hasFriendlyWorker[y][x]) {
+					nearbyWorkers++;
+				}
 			}
 		}
 	}
@@ -2760,6 +2900,42 @@ static bool isEnoughResourcesNearby(Unit& unit) {
 	}
 
 	return worthReplicating;
+}
+
+static std::tuple<int,int,int> factoryGetNearbyStuff(Unit& unit) {
+	if (!unit.is_on_map()) {
+		return make_tuple(0, 0, 0);
+	}
+
+	static const int search_dist = 5;
+
+	MapLocation loc = unit.get_map_location();
+	int locY = loc.get_y(), locX = loc.get_x();
+
+	int nearbyEnemyFactories = 0;
+	int nearbyFriendlyKnights = 0;
+	int nearbyEnemyKnights = 0;
+
+	for (int y = max(locY - search_dist, 0); y <= min(locY + search_dist, height - 1); y++) {
+		for (int x = max(locX - search_dist, 0); x <= min(locX + search_dist, width - 1); x++) {
+			if (dis[locY][locX][y][x] <= search_dist) {
+				if (hasEnemyUnit[y][x] && gc.can_sense_unit(enemyUnitId[y][x])) {
+					Unit other = gc.get_unit(enemyUnitId[y][x]);
+					if (other.get_team() != myTeam) {
+						if (other.get_unit_type() == Knight) {
+							nearbyEnemyKnights++;
+						}
+						if (is_fighter_unit_type(other.get_unit_type()) || other.get_unit_type() == Factory) {
+							nearbyEnemyFactories++;
+						}
+					}
+				}
+				nearbyFriendlyKnights += friendlyKnightCount[y][x];
+			}
+		}
+	}
+
+	return make_tuple(nearbyEnemyFactories, nearbyFriendlyKnights, nearbyEnemyKnights);
 }
 
 static bool bfsTowardsBlueprint(Unit& unit) {
@@ -3008,40 +3184,97 @@ static int shortRangeBfsToBestKarbonite(Unit &unit) {
 	return best_dir;
 }
 
-static void doBlueprintMovement(Unit &unit, bool &doneMovement) {
-	if (!doneMovement && isNextToBuildingBlueprint(unit.get_map_location())) {
-		// if next to blueprint, stay next to blueprint
-		doneMovement = true;
+static bool knight_bfs_to_enemy_unit(Unit &unit) {
+	// run towards enemy like an idiot
+	static const int search_dist = 7;
+
+	MapLocation loc = unit.get_map_location();
+	int start_y = loc.get_y();
+	int start_x = loc.get_x();
+	for (int y = std::max(start_y - search_dist, 0); y <= std::min(start_y + search_dist, height - 1); y++) {
+		for (int x = std::max(start_x - search_dist, 0); x <= std::min(start_x + search_dist, width - 1); x++) {
+			bfs_seen[y][x] = false;
+		}
 	}
-	if (!doneMovement) {
+
+	std::queue<std::tuple<int,int,int,int>> q;
+	q.emplace(start_y, start_x, 0, DirCenterIndex);
+	bfs_seen[start_y][start_x] = true;
+
+	while (!q.empty()) {
+		int cur_y, cur_x, cur_dist, cur_starting_dir;
+		std::tie(cur_y, cur_x, cur_dist, cur_starting_dir) = q.front();
+		q.pop();
+
+		if (hasEnemyUnit[cur_y][cur_x]) {
+			if (cur_starting_dir == DirCenterIndex) {
+				printf("Error in knight bfs!");
+			} else {
+				doMoveRobot(unit, directions[cur_starting_dir]);
+			}
+			return true;
+		}
+
+		if (cur_dist >= search_dist) {
+			continue;
+		}
+
+		shuffleDirOrder();
+		for (int i = 0; i < 8; i++) {
+			int ny = cur_y + dy[randDirOrder[i]];
+			int nx = cur_x + dx[randDirOrder[i]];
+			if (0 <= ny && ny < height &&
+					0 <= nx && nx < width &&
+					isPassable[ny][nx] &&
+					!hasFriendlyUnit[ny][nx] &&
+					!bfs_seen[ny][nx]) {
+				if (cur_dist == 0) {
+					// first move, set the starting direction
+					cur_starting_dir = randDirOrder[i];
+				}
+				bfs_seen[ny][nx] = true;
+				q.emplace(ny, nx, cur_dist + 1, cur_starting_dir);
+			}
+		}
+	}
+
+	return false;
+}
+
+static void doBlueprintMovement(Unit &unit, bool &doneMove) {
+	if (!doneMove && isNextToBuildingBlueprint(unit.get_map_location())) {
+		// if next to blueprint, stay next to blueprint
+		doneMove = true;
+	}
+	if (!doneMove) {
 		// if very near a blueprint, move towards it
 
 		if (bfsTowardsBlueprint(unit)) {
-			doneMovement = true;
+			doneMove = true;
 		}
 	}
 }
 
-static void doKarboniteMovement(Unit &unit, bool &doneMovement) {
-	if (!doneMovement) {
+static void doKarboniteMovement(Unit &unit, bool &doneMove) {
+	if (!doneMove) {
 		//  move towards karbonite
 
 		// try to move towards nearby karbonite squares that are nearer the enemy base and further from your own base
-		if (!doneMovement) {
+		if (!doneMove) {
 			int dir_index = shortRangeBfsToBestKarbonite(unit);
 			if (dir_index != DirCenterIndex) {
 				Direction dir = directions[dir_index];
 				doMoveRobot(unit, dir);
-				doneMovement = true;
+				doneMove = true;
 			}
 		}
 
 		// otherwise move to the closest karbonite
-		if (!doneMovement) {
+		if (!doneMove) {
 			MapLocation loc = unit.get_map_location();
 			if (distToKarbonite[loc.get_y()][loc.get_x()] != MultisourceBfsUnreachableMax) {
 				tryMoveToLoc(unit, distToKarbonite);
-				doneMovement = true;
+				doneMove = true;
 			}
 		}
 	}
@@ -3228,4 +3461,155 @@ static MapLocation getRandomMapLocation(Planet p, const MapLocation &giveUp) {
 		}
 	}
 	return result;
+}
+
+static void match_units_to_rockets (vector<Unit>& input_units) {
+	if (rockets_to_fill.empty()) {
+		return;
+	}
+
+	vector<Unit> loadable_units;
+	fo(i, 0, SZ(input_units)) {
+		Unit& unit = input_units[i];
+		if (unit.is_on_map() && is_healable_unit_type(unit.get_unit_type())) {
+			loadable_units.push_back(input_units[i]);
+		}
+	}
+
+	fo(z, 0, SZ(rockets_to_fill)) {
+		Unit& rocket = rockets_to_fill[z];
+
+		int ry = rocket.get_map_location().get_y();
+		int rx = rocket.get_map_location().get_x();
+
+		int healers_in_rocket = 0;
+		int workers_in_rocket = 0;
+
+		vector<unsigned> tmp_garrison = rocket.get_structure_garrison();
+		for (unsigned i : tmp_garrison)  {
+			UnitType tmp = gc.get_unit(i).get_unit_type();
+			healers_in_rocket += (tmp == Healer);
+			workers_in_rocket += (tmp == Worker);
+		}
+
+		int num_needed = int(rocket.get_structure_max_capacity() - tmp_garrison.size());
+
+		if (num_needed == 0) {
+			continue;
+		}
+
+		// sort all available units by distance from rocket
+
+		vector<tuple<int, int, UnitType>> sorted_by_dist;
+
+		fo(i, 0, SZ(loadable_units)) {
+			Unit& unit = loadable_units[i];
+
+			if (unit_summon.count(unit.get_id())) {
+				// already matched
+				continue;
+			}
+
+			int ty = unit.get_map_location().get_y();
+			int tx = unit.get_map_location().get_x();
+
+			sorted_by_dist.emplace_back(dis[ry][rx][ty][tx], unit.get_id(), unit.get_unit_type());
+		}
+
+		sort(sorted_by_dist.begin(), sorted_by_dist.end());
+
+		int c_healer = -1;
+		int c_worker = -1;
+
+		fo(i, 0, SZ(sorted_by_dist)) {
+			if (healers_in_rocket > 0 && workers_in_rocket > 0) {
+				break;
+				break;
+			}
+
+			int id;
+			UnitType type;
+			tie(ignore, id, type) = sorted_by_dist[i];
+
+			// don't bleed out of workers
+			if (numWorkers <= 2 && type == Worker) {
+				continue;
+			}
+
+			if (healers_in_rocket == 0 && type == Healer) {
+				healers_in_rocket++;
+				num_needed--;
+				c_healer = id;
+				unit_summon[id] = make_pair(ry, rx);
+			}
+
+			if (workers_in_rocket == 0 && type == Worker) {
+				workers_in_rocket++;
+				num_needed--;
+				c_worker = id;
+				unit_summon[id] = make_pair(ry, rx);
+			}
+		}
+
+		fo(i, 0, SZ(sorted_by_dist)) {
+			if (num_needed == 0) {
+				break;
+			}
+
+			int id;
+			UnitType type;
+			tie(ignore, id, type) = sorted_by_dist[i];
+
+			if (id == c_healer || id == c_worker) {
+				// don't double count on yourself
+				continue;
+			}
+
+			// don't bleed out of workers
+			if (numWorkers <= 2 && type == Worker) {
+				continue;
+			}
+
+			if (roundNum <= 700) {
+				// only specify unit types when you aren't in a huge rush
+				if (workers_in_rocket >= 3 && type == Worker) {
+					continue;
+				}
+
+				if (healers_in_rocket >= 2 && type == Healer) {
+					continue;
+				}
+			}
+
+			num_needed--;
+			unit_summon[id] = make_pair(ry, rx);
+		}
+	}
+}
+
+static bool try_summon_move (Unit& unit) {
+	if (unit_summon.count(unit.get_id())) {
+		// summoned to rocket
+		pair<int, int> dest = unit_summon[unit.get_id()];
+		tryMoveToLoc(unit, dis[dest.first][dest.second]);
+		return true;
+	} else {
+		return false;
+	}
+}
+
+static bool get_can_rocket () {
+	bool canRocket = (gc.get_research_info().get_level(Rocket) >= 1);
+
+	// already sent 2 early game
+	if (!raceToMars && num_rockets_sent >= 2) {
+		canRocket = false;
+	}
+
+	// not developed enough to sacrifice units
+	if (!raceToMars && (numRangers <= 20 || numIdleRangers == 0)) {
+		canRocket = false;
+	}
+
+	return canRocket;
 }

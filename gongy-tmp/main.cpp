@@ -838,6 +838,13 @@ static void init_turn (vector<Unit>& myUnits) {
 		}
 	}
 
+	// calculate dangerous squares
+	for (int y = 0; y < height; y++) for (int x = 0; x < width; x++) {
+		if (attackDistanceToEnemy[y][x] <= DangerDistanceThreshold) {
+			isSquareDangerous[y][x] = true;
+		}
+	}
+
 	fo(ty, 0, height) fo(tx, 0, width) {
 		if (time_since_damaged_unit[ty][tx] <= 5) {
 			for (int y = ty - 6; y <= ty + 6; y++) {
@@ -917,11 +924,6 @@ static void init_turn (vector<Unit>& myUnits) {
 			is_good_ranger_position[y][x] = true;
 			good_ranger_positions.push_back(make_pair(y, x));
 			//System.out.println("good position at " + y + " " + x);
-		}
-
-		// also calculate dangerous squares
-		if (attackDistanceToEnemy[y][x] <= DangerDistanceThreshold) {
-			isSquareDangerous[y][x] = true;
 		}
 	}
 	//DEBUG_OUTPUT("Number of good ranger positions: %d\n", int(good_ranger_positions.size()));
