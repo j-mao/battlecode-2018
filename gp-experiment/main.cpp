@@ -87,6 +87,7 @@ static bool hasFriendlyStructure[55][55];
 static bool hasEnemyUnit[55][55];
 static int enemyUnitHealth[55][55];
 static int enemyUnitId[55][55];
+static int availableOverchargeId[55][55];
 
 static int friendlyKnightCount[55][55];
 
@@ -260,6 +261,7 @@ static void runBattalions(vector<Unit>& myUnits);
 static void calculateManhattanDistancesToClosestEnemies(vector<Unit>& allUnits);
 static void doMoveRobot (Unit& unit, Direction dir);
 static void doBlinkRobot (Unit& unit, Direction dir);
+static bool doOvercharge (const std::pair<int, int> &healer_loc, Unit &unit_to_overcharge);
 static void shuffleDirOrder();
 static bool tryToMoveToRocket (Unit& unit );
 static int getTendency(Unit& unit);
@@ -269,6 +271,7 @@ static int getSpaceAround(MapLocation loc);
 static bool isFriendlyStructure(Unit unit);
 static bool isNextToBuildingBlueprint(MapLocation loc);
 static bool moveToAttackLocs (Unit& unit);
+static void get_available_overcharges_in_range(Unit& unit, std::vector<std::pair<int, int>> &result_vector);
 
 static MapLocation getRandomMapLocation(Planet p, const MapLocation &giveUp);
 static void moveToTendency(Unit& unit);
@@ -276,7 +279,7 @@ static int getRangerAttackPriority(const Unit& unit);
 static int getMageAttackPriority(Unit& unit);
 static bool rangerTryToAttack(Unit& unit);
 static bool mageTryToAttack(Unit& unit);
-static void tryToHealAndOvercharge(Unit& unit);
+static void tryToHeal(Unit& unit);
 static void multisourceBfsAvoidingUnitsAndDanger (vector<SimpleState>& startingLocs, int resultArr[55][55]);
 static void multisourceBfsAvoidingNothing (vector<SimpleState>& startingLocs, int resultArr[55][55]);
 static bool doReplicate(Unit& unit);
@@ -489,7 +492,7 @@ int main() {
 		high_resolution_clock::time_point prev_point = high_resolution_clock::now();
 
 		while (true) {
-			//DEBUG_OUTPUT("\n======================\nStarting round %d\n", roundNum);
+			DEBUG_OUTPUT("\n======================\nStarting round %d\n", roundNum);
 			if (gc.get_time_left_ms() < 300) {
 				DEBUG_OUTPUT("Warning: Running out of time! Skipping turn! (Less than 300 ms left.)\n");
 			} else {
@@ -684,6 +687,7 @@ static void init_turn (vector<Unit>& myUnits) {
 			numEnemiesThatCanAttackSquare[y][x] = 0;
 			mageAttackPriorities[y][x] = 0;
 			friendlyKnightCount[y][x] = 0;
+			availableOverchargeId[y][x] = -1;
 
 			time_since_damaged_unit[y][x]++;
 			is_good_healer_position[y][x] = false;
@@ -764,7 +768,11 @@ static void init_turn (vector<Unit>& myUnits) {
 
 				if (unit.get_unit_type() == Knight) {
  					friendlyKnightCount[loc.get_y()][loc.get_x()]++;
- 				}
+				}
+
+				if (has_overcharge_researched && unit.get_unit_type() == Healer && unit.get_ability_heat() < 10) {
+					availableOverchargeId[loc.get_y()][loc.get_x()] = unit.get_id();
+				}
 			}
 
 			// friendly unit counts
@@ -1127,12 +1135,22 @@ static void doMoveRobot (Unit& unit, Direction dir) {
 	if (gc.can_move(unit.get_id(), dir)) {
 		MapLocation loc = unit.get_map_location();
 		if (!hasFriendlyUnit[loc.get_y()][loc.get_x()]) {
-			DEBUG_OUTPUT("Error: hasFriendlyUnit[][] is incorrect!");
+			DEBUG_OUTPUT("Error: hasFriendlyUnit[][] is incorrect!\n");
 			return;
 		}
-		/*hasFriendlyUnit[loc.get_y()][loc.get_x()] = false;
 		MapLocation next_loc = loc.add(dir);
+		/*hasFriendlyUnit[loc.get_y()][loc.get_x()] = false;
 		hasFriendlyUnit[next_loc.get_y()][next_loc.get_x()] = true;*/
+
+		// update locations of healers with overcharge off cooldown
+		if (unit.get_unit_type() == Healer && availableOverchargeId[loc.get_y()][loc.get_x()] != -1) {
+			if (availableOverchargeId[loc.get_y()][loc.get_x()] != unit.get_id()) {
+				DEBUG_OUTPUT("Error: availableOverchargeId[][] is incorrect! FIX THIS!!\n");
+			}
+			availableOverchargeId[loc.get_y()][loc.get_x()] = -1;
+			availableOverchargeId[next_loc.get_y()][next_loc.get_x()] = unit.get_id();
+		}
+		
 		gc.move_robot(unit.get_id(), dir);
 	}
 }
@@ -1148,6 +1166,23 @@ static void doBlinkRobot (Unit& unit, MapLocation where) {
 		hasFriendlyUnit[where.get_y()][where.get_x()] = true;
 		gc.blink(unit.get_id(), where);
 	}
+}
+
+static bool doOvercharge (const std::pair<int, int> &healer_loc, Unit &unit_to_overcharge) {
+	int loc_y = healer_loc.first;
+	int loc_x = healer_loc.second;
+	int healer_id = availableOverchargeId[loc_y][loc_x];
+
+	// rip can_overcharge doesn't exist...
+	// I guess we'll just always return true and hope that it doesn't crash
+	printf("healer at %d %d overcharging unit at %d %d\n", loc_x, loc_y, unit_to_overcharge.get_map_location().get_x(),
+		unit_to_overcharge.get_map_location().get_y());
+	gc.overcharge(healer_id, unit_to_overcharge.get_id());
+
+	// remove available overcharge
+	availableOverchargeId[loc_y][loc_x] = -1;
+
+	return true;
 }
 
 static void shuffleDirOrder() {
@@ -1968,7 +2003,7 @@ static void runKnight (Unit& unit) {
 }
 
 static void runHealer (Unit& unit) {
-	tryToHealAndOvercharge(unit);
+	tryToHeal(unit);
 	bool doneMove = false;
 
 	if (!doneMove && try_summon_move(unit)) {
@@ -2004,7 +2039,7 @@ static void runHealer (Unit& unit) {
 	// update unit location and cooldowns
 	unit = gc.get_unit(unit.get_id());
 
-	tryToHealAndOvercharge(unit);
+	tryToHeal(unit);
 }
 
 static bool tryToMoveToRocket (Unit& unit ) {
@@ -2166,6 +2201,21 @@ static bool moveToAttackLocs (Unit& unit) {
 	return tryMoveToLoc(unit, dis[bestLoc.get_y()][bestLoc.get_x()]);
 }
 
+static void get_available_overcharges_in_range(Unit& unit, std::vector<std::pair<int, int>> &result_vector) {
+	MapLocation loc = unit.get_map_location();
+	int loc_y = loc.get_y();
+	int loc_x = loc.get_x();
+
+	// Warning: constant being used (healer overcharge range)
+	for (int y = std::max(0, loc_y - 5); y <= std::min(height - 1, loc_y + 5); y++) {
+		for (int x = std::max(0, loc_x - 5); x <= std::min(width - 1, loc_x + 5); x++) {
+			if (distance_squared(loc_y - y, loc_x - x) <= 30 && availableOverchargeId[y][x] != -1) {
+				result_vector.emplace_back(y, x);
+			}
+		}
+	}
+}
+
 static void moveToTendency(Unit& unit) {
 	Direction moveDir = directions[getTendency(unit)];
 	if (gc.is_move_ready(unit.get_id()) && gc.can_move(unit.get_id(), moveDir)) {
@@ -2230,26 +2280,114 @@ static bool rangerTryToAttack(Unit& unit) {
 		}
 		clock_t after_sense = clock();
 		ranger_attack_sense_stats.add(get_microseconds(before_sense, after_sense));
-		int whichToAttack = -1, whichToAttackHealth = 999, whichToAttackPriority = -1;
+
+		// units to attack. Stored as tuple of
+		// -- negative ranger attack priority (negative for sorting purposes)
+		// -- health
+		// -- index in units[]
+		vector<std::tuple<int, int, int>> to_attack;
+
 		for (int i = 0; i < units.size(); i++) {
 			const Unit &other = units[i];
 			if (other.get_team() != unit.get_team() && gc.can_attack(unit.get_id(), other.get_id())) {
 				int health = (int)other.get_health();
 				int attackPriority = (int) getRangerAttackPriority(other);
 
-				if (whichToAttack == -1 || (attackPriority>whichToAttackPriority) || (attackPriority==whichToAttackPriority && health < whichToAttackHealth)) {
-					whichToAttack = i;
-					whichToAttackPriority = attackPriority;
-					whichToAttackHealth = health;
+				to_attack.emplace_back(-attackPriority, health, i);
+			}
+		}
+
+		// sort highest priority units to the front
+		std::sort(to_attack.begin(), to_attack.end());
+
+		// do your first attack which is for free.
+		int to_attack_index = 0;
+		bool done_attack = false;
+		if (!to_attack.empty()) {
+			int enemy_index = std::get<2>(to_attack[0]);
+			gc.attack(unit.get_id(), units[enemy_index].get_id());
+			if (gc.can_sense_unit(units[enemy_index].get_id())) {
+				// enemy still alive, update unit health
+				units[enemy_index] = gc.get_unit(units[enemy_index].get_id());
+			} else {
+				// enemy killed
+				to_attack_index = 1;
+			}
+			done_attack = true;
+		}
+
+		// get all healers that have overcharge available that are in range
+		std::vector<std::pair<int, int>> available_overcharge_list;
+		get_available_overcharges_in_range(unit, available_overcharge_list);
+
+		// now go through all the enemies and if you can one shot them with overcharge, do it
+		bool overcharge_done = false;
+		int current_overcharge_index = 0;
+		int total_overcharges = int(available_overcharge_list.size());
+		for ( ; to_attack_index < int(to_attack.size()); to_attack_index++) {
+			const auto &tuple = to_attack[to_attack_index];
+			// check if we're out of overcharge
+			if (current_overcharge_index >= total_overcharges) {
+				break;
+			}
+
+			int enemy_index = std::get<2>(tuple);
+
+			// skip knights, they're not worth wasting overcharge on.
+			// NOTE: IF YOU DECIDE TO CHANGE THIS, THEN YOU MUST TAKE INTO ACCOUNT THE ENEMY
+			// KNIGHT UPGRADE LEVEL !!!!
+			// BECAUSE THIS WILL CHANGE HOW MANY ATTACKS IT TAKES TO ONE SHOT THEM!!!
+			// DON'T IGNORE THIS!!! ^^
+			if (units[enemy_index].get_unit_type() == Knight) {
+				continue;
+			}
+
+			// Warning: Constant being used (ranger attack damage)
+			int attacks_needed = (units[enemy_index].get_health() + 29) / 30;
+			if (attacks_needed <= total_overcharges - current_overcharge_index) {
+				for (int i = 0; i < attacks_needed; i++) {
+					if (doOvercharge(available_overcharge_list[current_overcharge_index], unit)) {
+						overcharge_done = true;
+					} else {
+						DEBUG_OUTPUT("Error: Bot thought that it could overcharge, but it couldn't!\n");
+						// overcharge failed, can't attack, just break rip
+						break;
+					}
+					current_overcharge_index++;
+
+					if (gc.can_attack(unit.get_id(), units[enemy_index].get_id())) {
+						gc.attack(unit.get_id(), units[enemy_index].get_id());
+					} else {
+						DEBUG_OUTPUT("Error: Ranger being overcharged thinks it can attack unit, but it can't!\n");
+						// Note: If this happens, it may be because the enemy unit object in units[enemy_index] was
+						// out of date before reaching this for loop. Make sure it's updated whenever it's attacked
+						// before reaching this for loop.
+
+						// rip, we somehow miscalculated the required number of attacks
+						// break so we don't waste any more overcharge on attacking this unit
+						break;
+					}
+				}
+
+				// check that we actually killed it
+				if (gc.can_sense_unit(units[enemy_index].get_id())) {
+					DEBUG_OUTPUT("Error: Ranger thought it one shot a unit with a bunch of overcharge, but it didnt!\n");
+				} else {
+					printf("Yay, one shot worked on unit at %d %d!\n", units[enemy_index].get_map_location().get_x(),
+						units[enemy_index].get_map_location().get_y());
 				}
 			}
 		}
-		if (whichToAttack != -1) {
-			gc.attack(unit.get_id(), units[whichToAttack].get_id());
-			return true;
+
+		if (overcharge_done) {
+			// if overcharge was done, put unit back into queue so they can do movement again
+			add_unit_to_all_my_units(gc.get_unit(unit.get_id()));
 		}
+
+		return done_attack;
+	} else {
+		return false;
 	}
-	return false;
 }
 
 // returns whether the unit attacked
@@ -2324,20 +2462,13 @@ static bool mageTryToAttack(Unit& unit) {
 // Requirements: The Unit object must have an up-to-date location and cooldowns.
 // Otherwise the healer won't heal even when it is able to
 // And the healer might incorrectly try to heal/overcharge, or waste time limit trying to when it can't
-static void tryToHealAndOvercharge(Unit& unit) {
+static void tryToHeal(Unit& unit) {
 	bool is_heal_ready = gc.is_heal_ready(unit.get_id());
 	// Only overcharges if the current round is an attack round
-	bool is_overcharge_ready =
-		has_overcharge_researched &&
-		unit.get_ability_heat() < 10 &&
-		is_attack_round;
-	if (unit.is_on_map() && (is_heal_ready || is_overcharge_ready)) {
+	if (unit.is_on_map() && is_heal_ready) {
 		// Warning: Constant being used (healer heal range)
-		// Warning: Constant being used (healer overcharge range)
-		// Currently heal range and overcharge range are the same. Need to change this if they change.
 		vector<Unit> units = gc.sense_nearby_units_by_team(unit.get_map_location(), 30, gc.get_team());
 		int whichToHeal = -1, whichToHealHealthMissing = -1;
-		int whichToOvercharge = -1, whichToOverchargeAttackHeat = -1;
 		for (int i = 0; i < units.size(); i++) {
 			const Unit &other = units[i];
 			// heal the unit with most health missing
@@ -2346,36 +2477,10 @@ static void tryToHealAndOvercharge(Unit& unit) {
 				whichToHeal = i;
 				whichToHealHealthMissing = healthMissing;
 			}
-			// overcharge a ranger within attack range of the enemy, and with the most attack heat
-			// if there's no ranger within attack range of the enemy, don't waste your overcharge! Just wait.
-			// TODO: add overcharging other units, e.g. mages
-			if (is_overcharge_ready) {
-				// Warning: constant being used (ranger attack range)
-				// TODO: does this crash if there are units in a garrison? Does sense unit get those units?
-				MapLocation other_loc = other.get_map_location();
-				if (other.get_unit_type() == Ranger && attackDistanceToEnemy[other_loc.get_y()][other_loc.get_x()] <= 50) {
-					if (whichToOvercharge == -1 || other.get_attack_heat() > whichToOverchargeAttackHeat) {
-						whichToOvercharge = i;
-						whichToOverchargeAttackHeat = other.get_attack_heat();
-					}
-				}
-			}
 		}
 		if (whichToHeal != -1 && whichToHealHealthMissing > 0) {
 			//System.out.println("Healer says: 'I'm being useful!'");
 			gc.heal(unit.get_id(), units[whichToHeal].get_id());
-		}
-		if (whichToOvercharge != -1 && whichToOverchargeAttackHeat >= 10) {
-			Unit other = units[whichToOvercharge];
-			if (other.is_on_map()) {
-				/*DEBUG_OUTPUT("healer at %d %d overcharging unit at %d %d\n", unit.get_map_location().get_x(), unit.get_map_location().get_y(),
-				  other.get_map_location().get_x(), other.get_map_location().get_y());*/
-				gc.overcharge(unit.get_id(), other.get_id());
-				add_unit_to_all_my_units(other);
-			} else {
-				DEBUG_OUTPUT("Error: Expected to be able to overcharge unit, but can't. "
-						"Probably because sense_nearby_units_by_team() returned a unit in a garrison.\n");
-			}
 		}
 	}
 }
