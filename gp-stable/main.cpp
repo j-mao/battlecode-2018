@@ -162,6 +162,25 @@ static vector<pair<int, int>> good_ranger_positions;
 
 static int lastKnownKarboniteAmount[55][55];
 static int distToKarbonite[55][55];
+// These variables are for making the worker replicate towards the center on maps where there are lots of resources in the "centre"
+// The "centre" of the map is defined as the area where abs(distToEnemyStartingLocs - distToMyStartingLocs) is <= centreSize
+// centreSize will be different on each map, depending on the distance between starting locs
+// (Note: this heuristic could be pretty wrong, e.g. on disconnected component maps.)
+static int shortestDistToEnemyStartLoc;
+static int centreSize;
+static int distToTheCentre[55][55];
+// centreKarbonite is the total amount of karbonite on "centre" squares
+static int centreKarbonite;
+// when a worker decides to replicate towards the centre, it makes it less worth it for other workers to replicate towards as well
+// So we keep track of "how much centre karbonite is going to be left" after a chuck is assumed to be taken
+// by the first replicating worker
+static int centreKarboniteLeft;
+// whether we've reached the centre yet. Once we've reached the centre, let the rest of the old worker logic take over
+static bool reachedCentre;
+// whether each square is a "centre square"
+static bool isCentreSquare[55][55];
+// this is the dist array (from multisourceBfs) to the closest karbonite square that is a "centre" square
+static int distToCentreKarbonite[55][55];
 
 static int time_since_damaged_unit[55][55];
 static bool is_good_healer_position[55][55];
@@ -328,6 +347,8 @@ static void doKarboniteMovement(Unit &unit, bool &doneMove);
 
 static void match_units_to_rockets (vector<Unit>& input_units);
 static bool try_summon_move (Unit& unit);
+
+static int howMuchCentreKarbToBeWorthIt(int distToCentre);
 
 static inline int distance_squared(int dy, int dx) {
 	return dy * dy + dx * dx;
@@ -731,6 +752,9 @@ static void init_turn (vector<Unit>& myUnits) {
 		is_attack_round = true;
 	}
 
+	// reset the amount of centre karbonite "left" over
+	centreKarboniteLeft = centreKarbonite;
+
 	// Research
 	ResearchInfo research_info = gc.get_research_info();
 	if (!has_overcharge_researched) {
@@ -1012,6 +1036,63 @@ static void init_global_variables () {
 	multisourceBfsAvoidingUnitsAndDanger(myStartingUnits, distToMyStartingLocs);
 	multisourceBfsAvoidingUnitsAndDanger(enemyStartingUnits, distToEnemyStartingLocs);
 
+	// calculating "centre" karbonite details must be done *after* calculating
+	// - distToMyStartingLocs and
+	// - distToEnemyStartingLocs
+	// - lastKnownKarboniteAmount
+	reachedCentre = false;
+	shortestDistToEnemyStartLoc = MultisourceBfsUnreachableMax;
+	for (int i = 0; i < (int)units.size(); i++) {
+		if (units[i].get_team() == myTeam) {
+			MapLocation loc = units[i].get_map_location();
+			shortestDistToEnemyStartLoc = std::min(shortestDistToEnemyStartLoc, distToEnemyStartingLocs[loc.get_y()][loc.get_x()]);
+		}
+	}
+	// centreSize is the maximum value of abs(distToEnemyStartingLocs - distToMyStartingLocs)
+	// that a square can have to be considered "in the centre".
+	centreSize = shortestDistToEnemyStartLoc / 3;
+	std::vector<SimpleState> allCentreKarboniteSquares;
+	for (int y = 0; y < height; y++) for (int x = 0; x < width; x++) {
+		// ignore unreachable squares at first, because if you calculate
+		// abs(distToEnemy - distToMy) on an unreachable square, you'll get 0 and you'll think it's in the centre
+		if (distToMyStartingLocs[y][x] == MultisourceBfsUnreachableMax) {
+			distToTheCentre[y][x] = MultisourceBfsUnreachableMax;
+		} else {
+			distToTheCentre[y][x] = std::abs(distToMyStartingLocs[y][x] - distToEnemyStartingLocs[y][x]);
+		}
+	}
+	for (int y = 0; y < height; y++) for (int x = 0; x < width; x++) {
+		// now for the unreachable squares, if they're next to a reachable square (e.g. they could be impassable but next
+		//     to a reachable square)
+		// then just set their distToTheCentre to be the minimum distToTheCentre from an adjacent reachable square + 1
+		// MAKE SURE IT'S A *REACHABLE* ADJACENT SQUARE
+		// otherwise you might set the wrong value for a whole connected component of unreachable squares
+		// And why +1? Idk 4Head. Seemed like a good idea at the time.
+		if (distToMyStartingLocs[y][x] == MultisourceBfsUnreachableMax) {
+			int min_value_for_adj_reachable_square = MultisourceBfsUnreachableMax;
+			for (int d = 0; d < 8; d++) {
+				int ny = y + dy[d];
+				int nx = x + dx[d];
+				if (0 <= ny && ny < height && 0 <= nx && nx < width &&
+						distToMyStartingLocs[ny][nx] != MultisourceBfsUnreachableMax) {
+					min_value_for_adj_reachable_square = std::min(min_value_for_adj_reachable_square,
+						distToTheCentre[ny][nx]);
+				}
+			}
+			distToTheCentre[y][x] = min_value_for_adj_reachable_square + 1;
+		}
+	}
+	for (int y = 0; y < height; y++) for (int x = 0; x < width; x++) {
+		if (lastKnownKarboniteAmount[y][x] > 0) {
+			if (distToTheCentre[y][x] <= centreSize) {
+				isCentreSquare[y][x] = true;
+				centreKarbonite += lastKnownKarboniteAmount[y][x];
+				allCentreKarboniteSquares.push_back(SimpleState(y, x));
+			}
+		}
+	}
+	multisourceBfsAvoidingUnitsAndDanger(allCentreKarboniteSquares, distToCentreKarbonite);
+
 	fo(i, 0, 8) randDirOrder[i] = i;
 
 	all_pairs_shortest_path();
@@ -1049,25 +1130,6 @@ static void init_global_variables () {
 
 int get_unit_order_priority (const Unit& unit) {
 	switch(unit.get_unit_type()) {
-		// Actually not sure whether fighting units or workers should go first... so just use the same priority...
-		case Ranger:
-		case Knight:
-		case Healer:
-			// Worker before factory so that workers can finish a currently building factory before the factory runs
-		case Worker:
-			if (unit.get_location().is_on_map()) {
-				MapLocation loc = unit.get_map_location();
-				// give priority to units that are closer to enemies
-				// NOTE: the default value for manhattanDistanceToNearestEnemy (ie the value when there are no nearby
-				//   enemies) should be less than 998 so that priorities don't get mixed up!
-				// NOTE: since we're giving priority to units that are closer to enemies, the frontline rangers should
-				//   run before healers, so that healers can overcharge them. Idk hopefully it works out xd.
-				return 1999 + manhattanDistanceToNearestEnemy[loc.get_y()][loc.get_x()];
-			} else {
-				return 2998;
-			}
-			// Factory before rocket so that factory can make a unit, then unit can get in rocket before the rocket runs
-			// Edit: not actually sure if you can actually do that lol... whatever.
 		case Mage:
 			// Run mages before others so that they get overcharge
 			if (unit.get_location().is_on_map()) {
@@ -1081,10 +1143,51 @@ int get_unit_order_priority (const Unit& unit) {
 			} else {
 				return 1998;
 			}
+
+		// Actually not sure whether fighting units or workers should go first... so just use the same priority...
+		// Edit: whatever, let fighting units go first
+		case Ranger:
+		case Knight:
+		case Healer:
+			if (unit.get_location().is_on_map()) {
+				MapLocation loc = unit.get_map_location();
+				// give priority to units that are closer to enemies
+				// NOTE: the default value for manhattanDistanceToNearestEnemy (ie the value when there are no nearby
+				//   enemies) should be less than 998 so that priorities don't get mixed up!
+				// NOTE: since we're giving priority to units that are closer to enemies, the frontline rangers should
+				//   run before healers, so that healers can overcharge them. Idk hopefully it works out xd.
+				return 1999 + manhattanDistanceToNearestEnemy[loc.get_y()][loc.get_x()];
+			} else {
+				return 2998;
+			}
+
+			// Worker before factory so that workers can finish a currently building factory before the factory runs
+		case Worker:
+			if (unit.get_location().is_on_map()) {
+				MapLocation loc = unit.get_map_location();
+
+				// If the round is early, give priority to the workers closest to the enemy starting locs
+				// so that the worker that is currently replicating towards the center karbonite
+				if (roundNum <= 80) {
+					return 1999 + distToEnemyStartingLocs[loc.get_y()][loc.get_x()];
+				} else {
+					// give priority to units that are closer to enemies
+					// NOTE: the default value for manhattanDistanceToNearestEnemy (ie the value when there are no nearby
+					//   enemies) should be less than 998 so that priorities don't get mixed up!
+					// NOTE: since we're giving priority to units that are closer to enemies, the frontline rangers should
+					//   run before healers, so that healers can overcharge them. Idk hopefully it works out xd.
+					return 1999 + manhattanDistanceToNearestEnemy[loc.get_y()][loc.get_x()];
+				}
+			} else {
+				return 2998;
+			}
+
+			// Factory before rocket so that factory can make a unit, then unit can get in rocket before the rocket runs
+			// Edit: not actually sure if you can actually do that lol... whatever.
 		case Factory:
-			return 2999;
+			return 4999;
 		case Rocket:
-			return 3999;
+			return 5999;
 	}
 	DEBUG_OUTPUT("ERROR: getUnitOrderPriority() does not recognise this unit type!");
 	return 9998;
@@ -1248,6 +1351,9 @@ static void runEarthWorker (Unit& unit) {
 			// mark as not the very early game anymore
 			is_very_early_game = false;
 		}
+		if (isCentreSquare[cur_loc.get_y()][cur_loc.get_x()]) {
+			reachedCentre = true;
+		}
 	}
 
 	bool doneMove = !gc.is_move_ready(unit.get_id());
@@ -1309,12 +1415,21 @@ static void runEarthWorker (Unit& unit) {
 
 	bool replicateForBuilding = (numFactories + numFactoryBlueprints > 0 && numWorkers < 4);
 	bool replicateForHarvesting = distToKarbonite[loc.get_y()][loc.get_x()] < IsEnoughResourcesNearbySearchDist && isEnoughResourcesNearby(unit);
+	bool replicateForCentreKarbonite = false;
+
+	if (is_very_early_game && roundNum <= 50 && !reachedCentre) {
+		// see doKarboniteMovement for more info on this if statement which checks whether it's worth it
+		// to replicate towards centre karbonite
+		if (centreKarboniteLeft > howMuchCentreKarbToBeWorthIt(distToCentreKarbonite[loc.get_y()][loc.get_x()])) {
+			replicateForCentreKarbonite = true;
+		}
+	}
 
 	bool canRocket = (gc.get_research_info().get_level(Rocket) >= 1);
 	bool lowRockets = ((int) rockets_to_fill.size() + numRocketBlueprints < maxConcurrentRocketsReady);
 	bool needToSave = (gc.get_karbonite() < 150 + 60);
 
-	bool shouldReplicate = (replicateForBuilding || replicateForHarvesting);
+	bool shouldReplicate = (replicateForBuilding || replicateForHarvesting || replicateForCentreKarbonite);
 
 	if (canRocket && lowRockets && needToSave) {
 		shouldReplicate = false;
@@ -2917,13 +3032,49 @@ static void multisourceBfsAvoidingNothing (vector<SimpleState>& startingLocs, in
 }
 
 static bool doReplicate(Unit& unit) {
-	if (unit.get_ability_heat() >= 10) {
-		// on cooldown
+	if (unit.get_ability_heat() >= 10 || gc.get_karbonite() < 60) {
+		// on cooldown or not enough karbonite
 		return false;
 	}
 
 	Direction replicateDir = Center;
 	MapLocation cur_loc = unit.get_map_location();
+
+	// if it's very early game and you're the currently replicating worker,
+	// consider replicating towards the karbonite in the centre of the map
+	if (replicateDir == Center && is_very_early_game && roundNum <= 50 && !reachedCentre) {
+
+		// see doKarboniteMovement for more info on this if statement which checks whether it's worth it
+		// to replicate towards centre karbonite
+		if (centreKarboniteLeft > howMuchCentreKarbToBeWorthIt(distToCentreKarbonite[cur_loc.get_y()][cur_loc.get_x()])) {
+			// let's do it
+
+			// take our chunk from centreKarboniteLeft, because it's now less worth it for other workers to also
+			// replicate towards the centre
+			centreKarboniteLeft -= howMuchCentreKarbToBeWorthIt(distToCentreKarbonite[cur_loc.get_y()][cur_loc.get_x()]);
+			// also permanently decrease the centreKarbonite to account for spending money on this replicate
+			centreKarbonite -= 60;
+
+			// now let's do the actual replication
+			shuffleDirOrder();
+			int best = -1, bestDist = MultisourceBfsUnreachableMax;
+			for (int i = 0; i < 8; i++) {
+				Direction dir = directions[randDirOrder[i]];
+				MapLocation next_loc = cur_loc.add(dir);
+				if (gc.can_replicate(unit.get_id(), dir)) {
+					int dist = distToCentreKarbonite[next_loc.get_y()][next_loc.get_x()];
+					if (best == -1 || dist < bestDist) {
+						best = randDirOrder[i];
+						bestDist = dist;
+					}
+				}
+			}
+
+			if (best != -1) {
+				replicateDir = directions[best];
+			}
+		}
+	}
 
 	// If you are closer to your own base than your opponents, then:
 	// Try to replicate towards best karbonite (ie karbonite close to enemy and far from your own base)
@@ -3541,6 +3692,21 @@ static void doBlueprintMovement(Unit &unit, bool &doneMove) {
 static void doKarboniteMovement(Unit &unit, bool &doneMove) {
 	if (!doneMove) {
 		//  move towards karbonite
+		MapLocation loc = unit.get_map_location();
+
+		// if it's the very early game and you're the replicating worker, consider moving towards the centre karbonite
+		if (!doneMove && is_very_early_game && roundNum < 50 && !reachedCentre && unit.get_ability_heat() < 20) {
+			// you need to replicate dist / 2 times to race to the centre karbonite
+			// because each turn you make 1 move and 1 replicate.
+			// Warning: constant used (replicate cost)
+			// We'll say it's worth it if the centreKarboniteLeft is greater than the cost of replicating all those workers
+			if (centreKarboniteLeft > howMuchCentreKarbToBeWorthIt(distToCentreKarbonite[loc.get_y()][loc.get_x()])) {
+				// don't modify the centreKarboniteLeft yet
+				// we'll do that in doReplicate
+				tryMoveToLoc(unit, distToCentreKarbonite);
+				doneMove = true;
+			}
+		}
 
 		// try to move towards nearby karbonite squares that are nearer the enemy base and further from your own base
 		if (!doneMove) {
@@ -3554,7 +3720,6 @@ static void doKarboniteMovement(Unit &unit, bool &doneMove) {
 
 		// otherwise move to the closest karbonite
 		if (!doneMove) {
-			MapLocation loc = unit.get_map_location();
 			if (distToKarbonite[loc.get_y()][loc.get_x()] != MultisourceBfsUnreachableMax) {
 				tryMoveToLoc(unit, distToKarbonite);
 				doneMove = true;
@@ -3857,4 +4022,13 @@ static bool try_summon_move (Unit& unit) {
 	} else {
 		return false;
 	}
+}
+
+static int howMuchCentreKarbToBeWorthIt(int distToCentre) {
+	// how much karbonite needs to be in the centre for it to be worth replicate towards the centre
+	// if you replicated towards the centre you would need 1 replicate per 2 steps (because each turn you can
+	// move once and then replicate once).
+	// Let's require that you almost recoup the cost of the workers.
+	// Warning: constant being used (replicate karbonite cost)
+	return distToCentre / 2 * 56;
 }
