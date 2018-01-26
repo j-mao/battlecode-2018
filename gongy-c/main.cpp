@@ -1258,7 +1258,7 @@ static void runEarthWorker (Unit& unit) {
 
 	bool canRocket = get_can_rocket();
 	bool lowRockets = ((int) rockets_to_fill.size() + numRocketBlueprints < maxConcurrentRocketsReady);
-	bool needToSave = (gc.get_karbonite() < 75 + 15);
+	bool needToSave = (gc.get_karbonite() < 150 + 60);
 
 	bool shouldReplicate = (replicateForBuilding || replicateForHarvesting);
 
