@@ -221,6 +221,11 @@ static int getClosestFreeGoodPositionCandidates[50 * 50 + 5];
 // rocket summoning: mapping unit id to target rocket
 static map<int, pair<int, int>> unit_summon;
 
+static const int FIGHTER_COST = 40;
+static const int ROCKET_COST = 150;
+static const int FACTORY_COST = 200;
+static const int WORKER_FACTORY_COST = 50;
+static const int REPLICATION_COST = 60;
 // stats about quantities of friendly units
 static int numWorkers;
 static int numKnights;
@@ -1258,7 +1263,7 @@ static void runEarthWorker (Unit& unit) {
 
 	bool canRocket = get_can_rocket();
 	bool lowRockets = ((int) rockets_to_fill.size() + numRocketBlueprints < maxConcurrentRocketsReady);
-	bool needToSave = (gc.get_karbonite() < 150 + 60);
+	bool needToSave = (gc.get_karbonite() < ROCKET_COST + REPLICATION_COST);
 
 	bool shouldReplicate = (replicateForBuilding || replicateForHarvesting);
 
@@ -1282,10 +1287,10 @@ static void runEarthWorker (Unit& unit) {
 	// hard code not building factory on round 1 so that we can replicate
 	if (roundNum > 1 && !doneAction) {
 		// if you can blueprint factory/rocket and want to blueprint factory/rocket...
-		if (gc.get_karbonite() >= 200 &&
-				(numFactories + numFactoryBlueprints < 3 ||
-				 gc.get_karbonite() >= 260 + (numFactories + numFactoryBlueprints - 3) * 30)) {
-
+		if (gc.get_karbonite() >= FACTORY_COST &&
+				(numFactories + numFactoryBlueprints < 4 ||
+				 gc.get_karbonite() >= 260 + (numFactories + numFactoryBlueprints - 4) * 30)) {
+				//TODO: Express above line in terms of constants
 			if (doBlueprint(unit, Factory)) {
 				doneAction = true;
 			}
@@ -1367,7 +1372,7 @@ static void runMarsWorker (Unit& unit) {
 	bool doneAction = false;
 
 	// late game or can afford rocket + units + replicate
-	bool shouldReplicate = (roundNum >= 751 || gc.get_karbonite() > 75 + 20*2 + 30);
+	bool shouldReplicate = (roundNum >= 751 || gc.get_karbonite() > (ROCKET_COST + FIGHTER_COST*2 + REPLICATION_COST));
 	shouldReplicate |= isEnoughResourcesNearby(unit);
 
 	if (!doneAction && unit.get_ability_heat() < 10 && shouldReplicate) {
@@ -1478,8 +1483,8 @@ static void runFactory (Unit& unit) {
 
 	bool canRocket = get_can_rocket();
 	bool lowRockets = ((int) rockets_to_fill.size() + numRocketBlueprints < maxConcurrentRocketsReady);
-	int unitCost = (unitTypeToBuild == Worker ? 50 : 40);
-	bool needToSave = (gc.get_karbonite() < 150 + unitCost);
+	int unitCost = (unitTypeToBuild == Worker ? WORKER_FACTORY_COST : FIGHTER_COST);
+	bool needToSave = (gc.get_karbonite() < ROCKET_COST + unitCost);
 
 	if (canRocket && lowRockets && needToSave) {
 		return;
@@ -2890,7 +2895,7 @@ static bool isEnoughResourcesNearby(Unit& unit) {
 		worthReplicating = nearbyKarbonite > 25 * (nearbyWorkers + 1);
 
 		// if still setting up, we can afford more leniency
-		if (numFactories + numFactoryBlueprints < 3 && nearbyKarbonite > 19 * (nearbyWorkers + 1) && nearbyWorkers < 7) {
+		if (numFactories + numFactoryBlueprints < 4 && nearbyKarbonite > 19 * (nearbyWorkers + 1) && nearbyWorkers < 7) {
 			worthReplicating = true;
 		}
 
