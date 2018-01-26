@@ -1861,10 +1861,13 @@ static void runFactory (Unit& unit) {
 	// Don't check for knights past round 150 to save time or something
 	bool done_choice = false;
 	if (roundNum <= 180) {
+
+		bool my_knight_rush = can_rush_enemy && roundNum <= 80;
+
 		// danger units = fighting units or factories
 		int enemyFactories, friendlyK, enemyK;
 		std::tie(enemyFactories, friendlyK, enemyK) = factoryGetNearbyStuff(unit);
-		if (can_rush_enemy || friendlyK < enemyK || (enemyFactories > 0 && friendlyK <= enemyK)) {
+		if (my_knight_rush || friendlyK < enemyK || (enemyFactories > 0 && friendlyK <= enemyK)) {
 			unitTypeToBuild = Knight;
 			done_choice = true;
 		}

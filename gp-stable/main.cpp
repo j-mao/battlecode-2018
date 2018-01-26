@@ -193,6 +193,9 @@ static bool reachedCentre;
 static bool isCentreSquare[55][55];
 // this is the dist array (from multisourceBfs) to the closest karbonite square that is a "centre" square
 static int distToCentreKarbonite[55][55];
+// When a worker is replicating towards the centre but currently does not have enough karbonite,
+// it sets this to reserve some of the karbonite so that other workers don't use it to replicate themselves
+static int karb_needed_to_save_for_centre_replication;
 
 static int time_since_damaged_unit[55][55];
 static bool is_good_healer_position[55][55];
@@ -340,6 +343,7 @@ static int getRangerAttackPriority(const Unit& unit);
 static int getMageAttackPriority(Unit& unit);
 static int getKnightAttackPriority(Unit& unit);
 static bool rangerTryToAttack(Unit& unit);
+static void knightTryToAttack (Unit& unit);
 static bool mageTryToAttack(Unit& unit);
 static void mageTryToBomb(Unit& unit);
 static void tryToHeal(Unit& unit);
@@ -556,6 +560,8 @@ int main() {
 		gc.queue_research(Mage);
 		gc.queue_research(Mage);
 		gc.queue_research(Mage);
+		gc.queue_research(Ranger);
+		gc.queue_research(Ranger);
 
 		int total_time = 0;
 		int prev_time_left_ms = gc.get_time_left_ms();
@@ -797,6 +803,8 @@ static void init_turn (vector<Unit>& myUnits) {
 	}
 	// reset the amount of centre karbonite "left" over
 	centreKarboniteLeft = centreKarbonite;
+	// reset the amount of karbonite that replicating workers have reserved
+	karb_needed_to_save_for_centre_replication = 0;
 
 	// Research
 	ResearchInfo research_info = gc.get_research_info();
@@ -1619,7 +1627,8 @@ static void runEarthWorker (Unit& unit) {
 	if (is_very_early_game && roundNum <= 50 && !reachedCentre) {
 		// see doKarboniteMovement for more info on this if statement which checks whether it's worth it
 		// to replicate towards centre karbonite
-		if (centreKarboniteLeft > howMuchCentreKarbToBeWorthIt(distToCentreKarbonite[loc.get_y()][loc.get_x()])) {
+		if (distToCentreKarbonite[loc.get_y()][loc.get_x()] != MultisourceBfsUnreachableMax &&
+			centreKarboniteLeft > howMuchCentreKarbToBeWorthIt(distToCentreKarbonite[loc.get_y()][loc.get_x()])) {
 			replicateForCentreKarbonite = true;
 		}
 	}
@@ -1634,11 +1643,17 @@ static void runEarthWorker (Unit& unit) {
 		shouldReplicate = false;
 	}
 
-	if (!doneAction && unit.get_ability_heat() < 10 && shouldReplicate) {
+	bool did_replicate = false;
+	// Warning: constant used (worker replication cost)
+	if (!doneAction && unit.get_ability_heat() < 10 && shouldReplicate && gc.get_karbonite() >= 60 + karb_needed_to_save_for_centre_replication) {
 		// try to replicate
 		if (doReplicate(unit)) {
 			doneAction = true;
+			did_replicate = true;
 		}
+	}
+	if (replicateForCentreKarbonite && !did_replicate) {
+		karb_needed_to_save_for_centre_replication += 60;
 	}
 
 	// Build before blueprinting so that we don't lay down a bunch of blueprints while we haven't even finished one factory
@@ -1845,11 +1860,14 @@ static void runFactory (Unit& unit) {
 	// TODO: maybe make knights past round 150, but maybe not. Who knows what the meta is now.
 	// Don't check for knights past round 150 to save time or something
 	bool done_choice = false;
-	if (roundNum <= 210) {
+	if (roundNum <= 180) {
+
+		bool my_knight_rush = can_rush_enemy && roundNum <= 80;
+
 		// danger units = fighting units or factories
 		int enemyFactories, friendlyK, enemyK;
 		std::tie(enemyFactories, friendlyK, enemyK) = factoryGetNearbyStuff(unit);
-		if (can_rush_enemy || friendlyK < enemyK || (enemyFactories > 0 && friendlyK <= enemyK)) {
+		if (my_knight_rush || friendlyK < enemyK || (enemyFactories > 0 && friendlyK <= enemyK)) {
 			unitTypeToBuild = Knight;
 			done_choice = true;
 		}
@@ -2369,12 +2387,43 @@ static void runMage (Unit& unit) {
 }
 
 static void runKnight (Unit& unit) {
+	knightTryToAttack(unit);
+
 	bool doneMove = false;
 
 	if (!doneMove && try_summon_move(unit)) {
 		doneMove = true;
 	}
 
+	if (!doneMove && unit.is_on_map() && gc.is_move_ready(unit.get_id())) {
+		// bfs(unit.get_map_location(), 1);
+
+		if (!doneMove) {
+			if (knight_bfs_to_enemy_unit(unit)) {
+				doneMove = true;
+			}
+		}
+
+		if (!doneMove) {
+			// try to move to attack location
+			if (moveToAttackLocs(unit)) {
+				doneMove = true;
+			}
+		}
+
+		if (!doneMove) {
+			// move to tendency
+			moveToTendency(unit);
+		}
+	}
+
+	unit = gc.get_unit(unit.get_id());
+
+	// try to attack after moving
+	knightTryToAttack(unit);
+}
+
+static void knightTryToAttack (Unit& unit) {
 	if (unit.is_on_map() && gc.is_attack_ready(unit.get_id())) {
 		vector<Unit> units = gc.sense_nearby_units(unit.get_map_location(), unit.get_attack_range());
 		int whichToAttack = -1;
@@ -2395,43 +2444,6 @@ static void runKnight (Unit& unit) {
 		}
 		if (whichToAttack != -1) {
 			gc.attack(unit.get_id(), units[whichToAttack].get_id());
-		}
-	}
-
-	if (!doneMove && unit.is_on_map() && gc.is_move_ready(unit.get_id())) {
-		// bfs(unit.get_map_location(), 1);
-
-		if (!doneMove) {
-			// try to move towards closest enemy unit
-			// If the closest enemy is within some arbitrary distance, attack them
-			// Currently set to ranger attack range
-			// Warning: Constant used that might change!
-			/*
-			   FOR PERFORMANCE REASONS BFS CLOSEST ENEMY DOES NOT WORK
-			   if (bfsClosestEnemy != NULL && unit.get_map_location().distanceSquaredTo(bfsClosestEnemy) <= RangerAttackRange) {
-			//System.out.println("My location = " + unit.get_map_location().toString() + ", closest enemy loc = " + bfsClosestEnemy.toString());
-			doneMove = true;
-			Direction dir = directions[bfsDirectionIndexTo[bfsClosestEnemy.get_y()][bfsClosestEnemy.get_x()]];
-			if (gc.can_move(unit.get_id(), dir)) {
-			doMoveRobot(unit, dir);
-			}
-			}
-			 */
-			if (knight_bfs_to_enemy_unit(unit)) {
-				doneMove = true;
-			}
-		}
-
-		if (!doneMove) {
-			// try to move to attack location
-			if (moveToAttackLocs(unit)) {
-				doneMove = true;
-			}
-		}
-
-		if (!doneMove) {
-			// move to tendency
-			moveToTendency(unit);
 		}
 	}
 }
@@ -3363,7 +3375,8 @@ static bool doReplicate(Unit& unit) {
 
 		// see doKarboniteMovement for more info on this if statement which checks whether it's worth it
 		// to replicate towards centre karbonite
-		if (centreKarboniteLeft > howMuchCentreKarbToBeWorthIt(distToCentreKarbonite[cur_loc.get_y()][cur_loc.get_x()])) {
+		if (distToCentreKarbonite[cur_loc.get_y()][cur_loc.get_x()] != MultisourceBfsUnreachableMax &&
+			centreKarboniteLeft > howMuchCentreKarbToBeWorthIt(distToCentreKarbonite[cur_loc.get_y()][cur_loc.get_x()])) {
 			// let's do it
 
 			// take our chunk from centreKarboniteLeft, because it's now less worth it for other workers to also
@@ -4030,8 +4043,10 @@ static int shortRangeBfsToBestKarbonite(Unit &unit) {
 }
 
 static bool knight_bfs_to_enemy_unit(Unit &unit) {
-	// run towards enemy like an idiot
 	static const int search_dist = 7;
+
+	// run towards enemy like an idiot
+	// uhhh if you're up against mage maybe let's not do that?
 
 	MapLocation loc = unit.get_map_location();
 	int start_y = loc.get_y();
@@ -4115,7 +4130,8 @@ static void doKarboniteMovement(Unit &unit, bool &doneMove) {
 			// because each turn you make 1 move and 1 replicate.
 			// Warning: constant used (replicate cost)
 			// We'll say it's worth it if the centreKarboniteLeft is greater than the cost of replicating all those workers
-			if (centreKarboniteLeft > howMuchCentreKarbToBeWorthIt(distToCentreKarbonite[loc.get_y()][loc.get_x()])) {
+			if (distToCentreKarbonite[loc.get_y()][loc.get_x()] != MultisourceBfsUnreachableMax &&
+				centreKarboniteLeft > howMuchCentreKarbToBeWorthIt(distToCentreKarbonite[loc.get_y()][loc.get_x()])) {
 				// don't modify the centreKarboniteLeft yet
 				// we'll do that in doReplicate
 				tryMoveToLoc(unit, distToCentreKarbonite);
