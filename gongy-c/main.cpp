@@ -1290,9 +1290,6 @@ static void runEarthWorker (Unit& unit) {
 				doneAction = true;
 			}
 		} else if (canRocket && lowRockets) {
-			if (gc.get_karbonite()>=150){
-				DEBUG_OUTPUT("calling doBlueprint with Rocket and karbonite = %d\n", gc.get_karbonite());
-			}
 			if (doBlueprint(unit, Rocket)) {
 				doneAction = true;
 			}
