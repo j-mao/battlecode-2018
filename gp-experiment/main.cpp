@@ -53,6 +53,15 @@ static int maxConcurrentRocketsReady = 1;
 
 static int connectedComponent[55][55]; // connected component id of each cell
 static int whichConnectedComponent[65536]; // connected component id of each unit
+static const int max_num_connected_components = 55/2*55/2;  
+//Should be enough: best layout would be  X.X.X.X.X.X.X.X.X  
+//                                        .................  
+//                                        X.X.X.X.X.X.X.X.X  
+//i.e; ((Rows+1)/2)*((Cols+1)/2) = 25*25;  
+static bool have_won_component[max_num_connected_components];  
+static int last_sighting[max_num_connected_components] = {-1};  
+int num_connected_components = 0;  
+
 
 static int dis[55][55][55][55];
 static bool hasFriendlyWorker[55][55];
@@ -927,10 +936,40 @@ static void init_turn (vector<Unit>& myUnits) {
 						}
 					}
 				}
+			  int enemy_component_num = connectedComponent[locY][locX];  
+        last_sighting[enemy_component_num]=roundNum;    
+       
 			}
 		}
 	}
+	// Calculate whether we have "won" any components  
+  // We have probably won a component if we haven't seen an enemy in threshold rounds  
+  // threshold = 10 if roundNum>100 otherwise 70 if roundNum > 5 otherwise INF; 
+  // (of course, we will check if we have won a component to begin with) 
+  int adjusted_round_num = (myPlanet==Earth)?roundNum:max(50,roundNum-750);  
+  int threshold = adjusted_round_num>100?10:(adjusted_round_num>50?70:9999);  
+  fo(component_num,1,num_connected_components+1){ 
+    //TODO: This will mark enemy components we can't see inside as "won" after a certain period of time, 
+    // but this shouldn't be an issue unless we are checking whether we 
+    // have won all components  
+    if (roundNum-last_sighting[component_num]>=threshold || last_sighting[component_num]==-1){ 
+      //If we haven't seen an enemy in a component the whole game, with have won the component  
+      if (!have_won_component[component_num])DEBUG_OUTPUT(" set have_won_component[%d] = true\n",component_num);  
+      have_won_component[component_num]=true; 
 
+    } else if (last_sighting[component_num]==roundNum){  
+
+       //Could have possibly previously "won" the component, or thought we had:  
+       //Either a) they have rocketed/blinked into this component or b)they stayed hidden for a long time;        
+			if (have_won_component[component_num])DEBUG_OUTPUT(" set have_won_component[%d] = false\n",component_num);  
+      have_won_component[component_num]=false; 
+      //If we saw an enemy in a component this turn, then we definetly haven't won it  
+    }   
+  }  
+ 
+
+
+	
 	// calculate dangerous squares
 	for (int y = 0; y < height; y++) for (int x = 0; x < width; x++) {
 		if (attackDistanceToEnemy[y][x] <= DangerDistanceThreshold) {
@@ -1167,12 +1206,18 @@ static void init_global_variables () {
 
 	is_very_early_game = true;
 
-	int num_connected_components = 0;
 	fo(y, 0, height) fo(x, 0, width) if (isPassable[y][x] && connectedComponent[y][x] == 0) {
 		vector<SimpleState> myLoc;
 		myLoc.push_back(SimpleState(y, x));
 		num_connected_components++;
 		do_flood_fill(myLoc, connectedComponent, isPassable, num_connected_components);
+    last_sighting[num_connected_components] = -1;  
+  } 
+ 
+  for (SimpleState loc: enemyStartingUnits){  
+    if (myPlanet == Earth){  
+      last_sighting[connectedComponent[loc.y][loc.x]]=0;  
+    }  
 	}
 
 	for (int y = 0; y < MarsMap.get_height(); y++) for (int x = 0; x < MarsMap.get_width(); x++) {
