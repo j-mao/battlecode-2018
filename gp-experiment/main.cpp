@@ -48,19 +48,20 @@ static int roundNum;
 
 static bool raceToMars = false;
 static bool can_rush_enemy = false;
+static int last_round_idle = -1000;
 
 static int maxConcurrentRocketsReady = 1;
 
 static int connectedComponent[55][55]; // connected component id of each cell
 static int whichConnectedComponent[65536]; // connected component id of each unit
-static const int max_num_connected_components = 55/2*55/2;  
-//Should be enough: best layout would be  X.X.X.X.X.X.X.X.X  
-//                                        .................  
-//                                        X.X.X.X.X.X.X.X.X  
-//i.e; ((Rows+1)/2)*((Cols+1)/2) = 25*25;  
-static bool have_won_component[max_num_connected_components];  
-static int last_sighting[max_num_connected_components] = {-1};  
-int num_connected_components = 0;  
+static const int max_num_connected_components = 55*55;
+//Should be enough: best layout would be  X.X.X.X.X.X.X.X.X
+//                                        .................
+//                                        X.X.X.X.X.X.X.X.X
+//i.e; ((Rows+1)/2)*((Cols+1)/2) = 25*25;
+static bool have_won_component[max_num_connected_components];
+static int last_sighting[max_num_connected_components] = {-1};
+int num_connected_components = 0;
 
 
 static int dis[55][55][55][55];
@@ -704,8 +705,22 @@ int main() {
 
 				//DEBUG_OUTPUT("Number of idle rangers is %3d / %3d\n", numIdleRangers, numRangers);
 
+				if (numIdleMages > numMages / 3 && numMages > 40) {
+					start_racing_to_mars();
+				}
 				if (numIdleRangers > numRangers / 3 && numRangers > 60) {
 					start_racing_to_mars();
+				}
+
+				// this lets you bypass race to mars temporarily for some rounds
+				if (numIdleMages > numMages / 2) {
+					last_round_idle = roundNum;
+				}
+				if (numIdleRangers > numRangers / 2) {
+					last_round_idle = roundNum;
+				}
+				if (last_round_idle == roundNum) {
+					// printf("Round %d idle\n", roundNum);
 				}
 			}
 
@@ -936,40 +951,39 @@ static void init_turn (vector<Unit>& myUnits) {
 						}
 					}
 				}
-			  int enemy_component_num = connectedComponent[locY][locX];  
-        last_sighting[enemy_component_num]=roundNum;    
-       
+
+				int enemy_component_num = connectedComponent[locY][locX];
+				last_sighting[enemy_component_num]=roundNum;
+
 			}
 		}
 	}
-	// Calculate whether we have "won" any components  
-  // We have probably won a component if we haven't seen an enemy in threshold rounds  
-  // threshold = 10 if roundNum>100 otherwise 70 if roundNum > 5 otherwise INF; 
-  // (of course, we will check if we have won a component to begin with) 
-  int adjusted_round_num = (myPlanet==Earth)?roundNum:max(50,roundNum-750);  
-  int threshold = adjusted_round_num>100?10:(adjusted_round_num>50?70:9999);  
-  fo(component_num,1,num_connected_components+1){ 
-    //TODO: This will mark enemy components we can't see inside as "won" after a certain period of time, 
-    // but this shouldn't be an issue unless we are checking whether we 
-    // have won all components  
-    if (roundNum-last_sighting[component_num]>=threshold || last_sighting[component_num]==-1){ 
-      //If we haven't seen an enemy in a component the whole game, with have won the component  
-      if (!have_won_component[component_num])DEBUG_OUTPUT(" set have_won_component[%d] = true\n",component_num);  
-      have_won_component[component_num]=true; 
 
-    } else if (last_sighting[component_num]==roundNum){  
+	// Calculate whether we have "won" any components
+	// We have probably won a component if we haven't seen an enemy in threshold rounds
+	// threshold = 10 if roundNum>100 otherwise 70 if roundNum > 5 otherwise INF;
+	// (of course, we will check if we have won a component to begin with)
+	int adjusted_round_num = (myPlanet==Earth)?roundNum:max(50,roundNum-750);
+	int threshold = adjusted_round_num>100?10:(adjusted_round_num>50?70:9999);
+	fo(component_num,1,num_connected_components+1){
+		//TODO: This will mark enemy components we can't see inside as "won" after a certain period of time,
+		// but this shouldn't be an issue unless we are checking whether we
+		// have won all components
+		if (roundNum-last_sighting[component_num]>=threshold || last_sighting[component_num]==-1){
+			//If we haven't seen an enemy in a component the whole game, with have won the component
+			if (!have_won_component[component_num])DEBUG_OUTPUT(" set have_won_component[%d] = true\n",component_num);
+			have_won_component[component_num]=true;
 
-       //Could have possibly previously "won" the component, or thought we had:  
-       //Either a) they have rocketed/blinked into this component or b)they stayed hidden for a long time;        
-			if (have_won_component[component_num])DEBUG_OUTPUT(" set have_won_component[%d] = false\n",component_num);  
-      have_won_component[component_num]=false; 
-      //If we saw an enemy in a component this turn, then we definetly haven't won it  
-    }   
-  }  
- 
+		} else if (last_sighting[component_num]==roundNum){
 
+			//Could have possibly previously "won" the component, or thought we had:
+			//Either a) they have rocketed/blinked into this component or b)they stayed hidden for a long time;
+			if (have_won_component[component_num])DEBUG_OUTPUT(" set have_won_component[%d] = false\n",component_num);
+			have_won_component[component_num]=false;
+			//If we saw an enemy in a component this turn, then we definetly haven't won it
+		}
+	}
 
-	
 	// calculate dangerous squares
 	for (int y = 0; y < height; y++) for (int x = 0; x < width; x++) {
 		if (attackDistanceToEnemy[y][x] <= DangerDistanceThreshold) {
@@ -1087,6 +1101,8 @@ static void start_racing_to_mars () {
 	if (raceToMars || myPlanet == Mars) {
 		return;
 	}
+
+	DEBUG_OUTPUT("START RACING TO MARS round %d\n", roundNum);
 
 	raceToMars = true;
 	maxConcurrentRocketsReady = 3;
@@ -1211,13 +1227,13 @@ static void init_global_variables () {
 		myLoc.push_back(SimpleState(y, x));
 		num_connected_components++;
 		do_flood_fill(myLoc, connectedComponent, isPassable, num_connected_components);
-    last_sighting[num_connected_components] = -1;  
-  } 
- 
-  for (SimpleState loc: enemyStartingUnits){  
-    if (myPlanet == Earth){  
-      last_sighting[connectedComponent[loc.y][loc.x]]=0;  
-    }  
+		last_sighting[num_connected_components] = -1000;
+	}
+
+	for (SimpleState loc: enemyStartingUnits){
+		if (myPlanet == Earth) {
+			last_sighting[connectedComponent[loc.y][loc.x]]=0;
+		}
 	}
 
 	for (int y = 0; y < MarsMap.get_height(); y++) for (int x = 0; x < MarsMap.get_width(); x++) {
@@ -1609,7 +1625,7 @@ static void runEarthWorker (Unit& unit) {
 	}
 
 	bool canRocket = get_can_rocket();
-	bool lowRockets = ((int) rockets_to_fill.size() + numRocketBlueprints < maxConcurrentRocketsReady && numRocketBlueprints < 1);
+	bool lowRockets = ((int) rockets_to_fill.size() + numRocketBlueprints < maxConcurrentRocketsReady && numRocketBlueprints < 2);
 	bool needToSave = (gc.get_karbonite() < 150 + 60);
 
 	bool shouldReplicate = (replicateForBuilding || replicateForHarvesting || replicateForCentreKarbonite || replicateForRocketRace);
@@ -1829,7 +1845,7 @@ static void runFactory (Unit& unit) {
 	// TODO: maybe make knights past round 150, but maybe not. Who knows what the meta is now.
 	// Don't check for knights past round 150 to save time or something
 	bool done_choice = false;
-	if (roundNum <= 150) {
+	if (roundNum <= 210) {
 		// danger units = fighting units or factories
 		int enemyFactories, friendlyK, enemyK;
 		std::tie(enemyFactories, friendlyK, enemyK) = factoryGetNearbyStuff(unit);
@@ -1862,7 +1878,7 @@ static void runFactory (Unit& unit) {
 	}
 
 	bool canRocket = get_can_rocket();
-	bool lowRockets = ((int) rockets_to_fill.size() + numRocketBlueprints < maxConcurrentRocketsReady && numRocketBlueprints < 1);
+	bool lowRockets = ((int) rockets_to_fill.size() + numRocketBlueprints < maxConcurrentRocketsReady && numRocketBlueprints < 2);
 	int unitCost = (unitTypeToBuild == Worker ? 50 : 40);
 	bool needToSave = (gc.get_karbonite() < 150 + unitCost);
 
@@ -4465,14 +4481,17 @@ static bool try_summon_move (Unit& unit) {
 
 static bool get_can_rocket () {
 	bool canRocket = (gc.get_research_info().get_level(Rocket) >= 1);
-	
+
+	// some situations really need rockets, ignore restrictions
+	bool bypassLogic = raceToMars || last_round_idle >= roundNum-20;
+
 	// already sent 2 early game
-	if (!raceToMars && num_rockets_sent >= 2) {
+	if (!bypassLogic && num_rockets_sent >= 2) {
 		canRocket = false;
 	}
 
 	// not developed enough to sacrifice units
-	if (!raceToMars && (numRangers <= 15 || numIdleRangers == 0)) {
+	if (!bypassLogic && (numRangers <= 15 || numIdleRangers == 0)) {
 		canRocket = false;
 	}
 
