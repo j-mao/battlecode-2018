@@ -1307,12 +1307,12 @@ static void runEarthWorker (Unit& unit) {
 	// actions
 	bool doneAction = false;
 
-	bool replicateForBuilding = (numFactories + numFactoryBlueprints > 0 && numWorkers < 6);
+	bool replicateForBuilding = (numFactories + numFactoryBlueprints > 0 && numWorkers < 4);
 	bool replicateForHarvesting = distToKarbonite[loc.get_y()][loc.get_x()] < IsEnoughResourcesNearbySearchDist && isEnoughResourcesNearby(unit);
 
 	bool canRocket = (gc.get_research_info().get_level(Rocket) >= 1);
 	bool lowRockets = ((int) rockets_to_fill.size() + numRocketBlueprints < maxConcurrentRocketsReady);
-	bool needToSave = (gc.get_karbonite() < 75 + 15);
+	bool needToSave = (gc.get_karbonite() < 150 + 60);
 
 	bool shouldReplicate = (replicateForBuilding || replicateForHarvesting);
 
@@ -1336,9 +1336,9 @@ static void runEarthWorker (Unit& unit) {
 	// hard code not building factory on round 1 so that we can replicate
 	if (roundNum > 1 && !doneAction) {
 		// if you can blueprint factory/rocket and want to blueprint factory/rocket...
-		if (gc.get_karbonite() >= 100 &&
-				(numFactories + numFactoryBlueprints < 3 ||
-				 gc.get_karbonite() >= 130 + (numFactories + numFactoryBlueprints - 3) * 15)) {
+		if (gc.get_karbonite() >= 200 &&
+				(numFactories + numFactoryBlueprints < 4 ||
+				 gc.get_karbonite() >= 280 + (numFactories + numFactoryBlueprints - 4) * 40)) {
 
 			if (doBlueprint(unit, Factory)) {
 				doneAction = true;
@@ -1422,7 +1422,7 @@ static void runMarsWorker (Unit& unit) {
 	bool doneAction = false;
 
 	// late game or can afford rocket + units + replicate
-	bool shouldReplicate = (roundNum >= 751 || gc.get_karbonite() > 75 + 20*2 + 30);
+	bool shouldReplicate = (roundNum >= 751 || gc.get_karbonite() > 150 + 40*2 + 60);
 	shouldReplicate |= isEnoughResourcesNearby(unit);
 
 	if (!doneAction && unit.get_ability_heat() < 10 && shouldReplicate) {
@@ -1506,6 +1506,7 @@ static void runFactory (Unit& unit) {
 	MapLocation loc = unit.get_map_location();
 
 	// TODO: change proportion based on current research levels
+	// TODO: maybe make knights past round 150, but maybe not. Who knows what the meta is now.
 	// Don't check for knights past round 150 to save time or something
  	bool done_choice = false;
  	if (roundNum <= 150) {
@@ -1542,8 +1543,8 @@ static void runFactory (Unit& unit) {
 
 	bool canRocket = (gc.get_research_info().get_level(Rocket) >= 1);
 	bool lowRockets = ((int) rockets_to_fill.size() + numRocketBlueprints < maxConcurrentRocketsReady);
-	int unitCost = (unitTypeToBuild == Worker ? 25 : 20);
-	bool needToSave = (gc.get_karbonite() < 75 + unitCost);
+	int unitCost = (unitTypeToBuild == Worker ? 50 : 40);
+	bool needToSave = (gc.get_karbonite() < 150 + unitCost);
 
 	if (canRocket && lowRockets && needToSave) {
 		return;
@@ -3170,15 +3171,15 @@ static bool isEnoughResourcesNearby(Unit& unit) {
 	bool worthReplicating = false;
 	if (myPlanet == Earth) {
 		//System.out.println("worker at " + loc.toString() + " considering replicating with " + nearbyKarbonite + " karbonite nearby and " + nearbyWorkers + " nearby workers");
-		worthReplicating = nearbyKarbonite > 25 * (nearbyWorkers + 1);
+		worthReplicating = nearbyKarbonite > 50 * (nearbyWorkers + 1);
 
 		// if still setting up, we can afford more leniency
-		if (numFactories + numFactoryBlueprints < 3 && nearbyKarbonite > 19 * (nearbyWorkers + 1) && nearbyWorkers < 7) {
+		if (numFactories + numFactoryBlueprints < 4 && nearbyKarbonite > 40 * (nearbyWorkers + 1) && nearbyWorkers < 5) {
 			worthReplicating = true;
 		}
 
 	} else {
-		worthReplicating = nearbyKarbonite > 31 * (nearbyWorkers + 1);
+		worthReplicating = nearbyKarbonite > 62 * (nearbyWorkers + 1);
 	}
 
 	return worthReplicating;
