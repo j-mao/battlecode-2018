@@ -1719,10 +1719,15 @@ static void runRanger (Unit& unit) {
 					}
 				}
 
-				if (doneAttack) {
-					// just completed an attack, move backwards now to kite if you can
+				if (doneAttack || attackDistanceToEnemy[myY][myX] <= 36) {
+					// just completed an attack or we're too close to the enemy
+					// move backwards now to kite if you can
 
-					if (best != -1 && bestNumEnemies < numEnemiesThatCanAttackSquare[myY][myX]) {
+					// if the chosen square is attacked by less enemies, or if we're too close and the best square is further away
+					// then move
+					if (best != -1 &&
+							(bestNumEnemies < numEnemiesThatCanAttackSquare[myY][myX] ||
+							 (attackDistanceToEnemy[myY][myX] <= 36 && bestAttackDist > attackDistanceToEnemy[myY][myX]))) {
 						// System.out.println("kiting backwards!");
 						doMoveRobot(unit, directions[best]);
 
