@@ -340,6 +340,7 @@ static int getRangerAttackPriority(const Unit& unit);
 static int getMageAttackPriority(Unit& unit);
 static int getKnightAttackPriority(Unit& unit);
 static bool rangerTryToAttack(Unit& unit);
+static void knightTryToAttack (Unit& unit);
 static bool mageTryToAttack(Unit& unit);
 static void mageTryToBomb(Unit& unit);
 static void tryToHeal(Unit& unit);
@@ -556,6 +557,8 @@ int main() {
 		gc.queue_research(Mage);
 		gc.queue_research(Mage);
 		gc.queue_research(Mage);
+		gc.queue_research(Ranger);
+		gc.queue_research(Ranger);
 
 		int total_time = 0;
 		int prev_time_left_ms = gc.get_time_left_ms();
@@ -2369,12 +2372,43 @@ static void runMage (Unit& unit) {
 }
 
 static void runKnight (Unit& unit) {
+	knightTryToAttack(unit);
+
 	bool doneMove = false;
 
 	if (!doneMove && try_summon_move(unit)) {
 		doneMove = true;
 	}
 
+	if (!doneMove && unit.is_on_map() && gc.is_move_ready(unit.get_id())) {
+		// bfs(unit.get_map_location(), 1);
+
+		if (!doneMove) {
+			if (knight_bfs_to_enemy_unit(unit)) {
+				doneMove = true;
+			}
+		}
+
+		if (!doneMove) {
+			// try to move to attack location
+			if (moveToAttackLocs(unit)) {
+				doneMove = true;
+			}
+		}
+
+		if (!doneMove) {
+			// move to tendency
+			moveToTendency(unit);
+		}
+	}
+
+	unit = gc.get_unit(unit.get_id());
+
+	// try to attack after moving
+	knightTryToAttack(unit);
+}
+
+static void knightTryToAttack (Unit& unit) {
 	if (unit.is_on_map() && gc.is_attack_ready(unit.get_id())) {
 		vector<Unit> units = gc.sense_nearby_units(unit.get_map_location(), unit.get_attack_range());
 		int whichToAttack = -1;
@@ -2395,43 +2429,6 @@ static void runKnight (Unit& unit) {
 		}
 		if (whichToAttack != -1) {
 			gc.attack(unit.get_id(), units[whichToAttack].get_id());
-		}
-	}
-
-	if (!doneMove && unit.is_on_map() && gc.is_move_ready(unit.get_id())) {
-		// bfs(unit.get_map_location(), 1);
-
-		if (!doneMove) {
-			// try to move towards closest enemy unit
-			// If the closest enemy is within some arbitrary distance, attack them
-			// Currently set to ranger attack range
-			// Warning: Constant used that might change!
-			/*
-			   FOR PERFORMANCE REASONS BFS CLOSEST ENEMY DOES NOT WORK
-			   if (bfsClosestEnemy != NULL && unit.get_map_location().distanceSquaredTo(bfsClosestEnemy) <= RangerAttackRange) {
-			//System.out.println("My location = " + unit.get_map_location().toString() + ", closest enemy loc = " + bfsClosestEnemy.toString());
-			doneMove = true;
-			Direction dir = directions[bfsDirectionIndexTo[bfsClosestEnemy.get_y()][bfsClosestEnemy.get_x()]];
-			if (gc.can_move(unit.get_id(), dir)) {
-			doMoveRobot(unit, dir);
-			}
-			}
-			 */
-			if (knight_bfs_to_enemy_unit(unit)) {
-				doneMove = true;
-			}
-		}
-
-		if (!doneMove) {
-			// try to move to attack location
-			if (moveToAttackLocs(unit)) {
-				doneMove = true;
-			}
-		}
-
-		if (!doneMove) {
-			// move to tendency
-			moveToTendency(unit);
 		}
 	}
 }
@@ -4030,8 +4027,10 @@ static int shortRangeBfsToBestKarbonite(Unit &unit) {
 }
 
 static bool knight_bfs_to_enemy_unit(Unit &unit) {
-	// run towards enemy like an idiot
 	static const int search_dist = 7;
+
+	// run towards enemy like an idiot
+	// uhhh if you're up against mage maybe let's not do that?
 
 	MapLocation loc = unit.get_map_location();
 	int start_y = loc.get_y();
