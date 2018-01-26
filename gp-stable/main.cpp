@@ -306,7 +306,8 @@ static void updateTendency(int id, int changeChance);
 static int moveDistance(MapLocation a, MapLocation b);
 static int getSpaceAround(MapLocation loc);
 static bool isFriendlyStructure(Unit unit);
-static bool isNextToBuildingBlueprint(MapLocation loc);
+static int dirToAdjacentBuildingBlueprint(MapLocation loc);
+static void moveButStayNextToLoc(Unit &unit, const MapLocation &loc);
 static bool moveToAttackLocs (Unit& unit);
 static void get_available_overcharges_in_range(Unit& unit, std::vector<std::pair<int, int>> &result_vector);
 
@@ -2376,7 +2377,7 @@ static bool isFriendlyStructure(Unit unit) {
 }
 
 // Required: loc must be a valid location (ie not out of bounds)
-static bool isNextToBuildingBlueprint(MapLocation loc) {
+static int dirToAdjacentBuildingBlueprint(MapLocation loc) {
 	for (int i = 0; i < 8; i++) {
 		MapLocation other = loc.add(directions[i]);
 		if (gc.has_unit_at_location(other)) {
@@ -2384,11 +2385,23 @@ static bool isNextToBuildingBlueprint(MapLocation loc) {
 			if (unit.get_team() == gc.get_team() &&
 					(unit.get_unit_type() == Factory || unit.get_unit_type() == Rocket)
 					&& unit.structure_is_built() == 0) {
-				return true;
+				return i;
 			}
 		}
 	}
-	return false;
+	return -1;
+}
+
+static void moveButStayNextToLoc(Unit &unit, const MapLocation &loc) {
+	shuffleDirOrder();
+	for (int i = 0; i < 8; i++) {
+		Direction dir = directions[randDirOrder[i]];
+		MapLocation next = unit.get_map_location().add(dir);
+		if (gc.can_move(unit.get_id(), dir) && distance_squared(next.get_y() - loc.get_y(), next.get_x() - loc.get_x()) <= 2) {
+			doMoveRobot(unit, dir, false);
+			break;
+		}
+	}
 }
 
 static bool moveToAttackLocs (Unit& unit) {
@@ -3112,7 +3125,7 @@ static bool doReplicate(Unit& unit) {
 		for (int i = 0; i < 8; i++) {
 			Direction dir = directions[randDirOrder[i]];
 			if (gc.can_replicate(unit.get_id(), dir) &&
-					isNextToBuildingBlueprint(unit.get_map_location().add(dir))) {
+					dirToAdjacentBuildingBlueprint(unit.get_map_location().add(dir)) != -1) {
 				replicateDir = dir;
 				break;
 			}
@@ -3681,9 +3694,13 @@ static bool knight_bfs_to_enemy_unit(Unit &unit) {
 }
 
 static void doBlueprintMovement(Unit &unit, bool &doneMove) {
-	if (!doneMove && isNextToBuildingBlueprint(unit.get_map_location())) {
-		// if next to blueprint, stay next to blueprint
-		doneMove = true;
+	if (!doneMove) {
+		int blueprint_dir = dirToAdjacentBuildingBlueprint(unit.get_map_location());
+		if (blueprint_dir != -1) {
+			// if next to blueprint, stay next to blueprint
+			moveButStayNextToLoc(unit, unit.get_map_location().add(directions[blueprint_dir]));
+			doneMove = true;
+		}
 	}
 	if (!doneMove) {
 		// if very near a blueprint, move towards it
