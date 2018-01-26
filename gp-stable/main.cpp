@@ -306,6 +306,7 @@ static void updateTendency(int id, int changeChance);
 static int moveDistance(MapLocation a, MapLocation b);
 static int getSpaceAround(MapLocation loc);
 static bool isFriendlyStructure(Unit unit);
+static int dirToAdjacentDamagedStructure(MapLocation loc);
 static int dirToAdjacentBuildingBlueprint(MapLocation loc);
 static void moveButStayNextToLoc(Unit &unit, const MapLocation &loc);
 static bool moveToAttackLocs (Unit& unit);
@@ -329,6 +330,7 @@ template<typename T>
 static void do_flood_fill(vector<SimpleState>& startingLocs, T resultArr[55][55], bool passableArr[55][55], T label);
 static int can_reach_enemy_on_earth();
 
+static bool bfsTowardsDamagedStructure(Unit& unit);
 static bool bfsTowardsBlueprint(Unit& unit);
 static bool doBuild(Unit& unit);
 static bool doBlueprint(Unit& unit, UnitType toBlueprint);
@@ -1367,6 +1369,24 @@ static void runEarthWorker (Unit& unit) {
 	if (!doneMove && false /* need to place factory and no adjacent good places and nearby good place */) {
 		// move towards good place
 	}
+
+	if (!doneMove) {
+		// if next to damaged structure, stay next to damaged structure
+		int damaged_structure_dir = dirToAdjacentDamagedStructure(unit.get_map_location());
+
+		if (damaged_structure_dir != -1) {
+			moveButStayNextToLoc(unit, unit.get_map_location().add(directions[damaged_structure_dir]));
+			doneMove = true;
+		}
+	}
+	if (!doneMove) {
+		// move towards damaged structure
+
+		if (bfsTowardsDamagedStructure(unit)) {
+			doneMove = true;
+		}
+	}
+
 	// If it's early game and you're a currently replicating worker, prioritize karbonite over blueprints
 	// Otherwise prioritise blueprints over karbonite
 	// See declaration of is_very_early_game for how we define early game
@@ -1379,16 +1399,6 @@ static void runEarthWorker (Unit& unit) {
 	} else {
 		doBlueprintMovement(unit, doneMove);
 		doKarboniteMovement(unit, doneMove);
-	}
-	if (!doneMove /* next to damaged structure */) {
-		// done, stay next to damaged structure
-
-		// TODO: implement this
-	}
-	if (!doneMove /* damaged structure */) {
-		// move towards damaged structure
-
-		// TODO: implement this
 	}
 
 	if (!doneMove) {
@@ -2374,6 +2384,22 @@ static int getSpaceAround(MapLocation loc) {
 
 static bool isFriendlyStructure(Unit unit) {
 	return unit.get_team() == gc.get_team() && (unit.get_unit_type() == Factory || unit.get_unit_type() == Rocket);
+}
+
+static int dirToAdjacentDamagedStructure(MapLocation loc) {
+	for (int i = 0; i < 8; i++) {
+		MapLocation other = loc.add(directions[i]);
+		if (gc.has_unit_at_location(other)) {
+			Unit unit = gc.sense_unit_at_location(other);
+			if (unit.get_team() == gc.get_team() &&
+					(unit.get_unit_type() == Factory || unit.get_unit_type() == Rocket) &&
+					 unit.structure_is_built() &&
+					 unit.get_health() < unit.get_max_health()) {
+				return i;
+			}
+		}
+	}
+	return -1;
 }
 
 // Required: loc must be a valid location (ie not out of bounds)
@@ -3388,6 +3414,90 @@ static std::tuple<int,int,int> factoryGetNearbyStuff(Unit& unit) {
 	}
 
 	return make_tuple(nearbyEnemyFactories, nearbyFriendlyKnights, nearbyEnemyKnights);
+}
+
+static bool bfsTowardsDamagedStructure(Unit& unit) {
+	// This is mostly copied from bfsTowardsBlueprint
+	// We even re-use the bfsTowardsBlueprintDist[][] array
+	// whatever
+
+	// Differences:
+	// - of course, we're going towards damaged structures
+	// - we ignore danger. Saving them blueprints is more important
+
+	int dist = 5;
+
+	MapLocation loc = unit.get_map_location();
+	int locY = loc.get_y();
+	int locX = loc.get_x();
+
+	for (int y = max(locY - dist, 0); y <= min(locY + dist, height - 1); y++) {
+		for (int x = max(locX - dist, 0); x <= min(locX + dist, width - 1); x++) {
+			bfsTowardsBlueprintDist[y][x] = -1;
+		}
+	}
+
+	queue<BfsState> q;
+
+	q.push(BfsState(locY, locX, DirCenterIndex));
+	bfsTowardsBlueprintDist[locY][locX] = 0;
+
+	Direction dirToMove = Center;
+
+	while (!q.empty()) {
+		BfsState cur = q.front();
+		q.pop();
+
+
+		if (bfsTowardsBlueprintDist[cur.y][cur.x] < dist) {
+			for (int d = 0; d < 8; d++) {
+				int ny = cur.y + dy[d];
+				int nx = cur.x + dx[d];
+				if (0 <= ny && ny < height && 0 <= nx && nx < width &&
+						isPassable[ny][nx] &&
+						bfsTowardsBlueprintDist[ny][nx] == -1) {
+					bfsTowardsBlueprintDist[ny][nx] = bfsTowardsBlueprintDist[cur.y][cur.x] + 1;
+
+					if (bfsTowardsBlueprintDist[cur.y][cur.x] == 0) {
+						// first move so set starting direction
+						cur.startingDir = d;
+					}
+
+					// if the next square has a friendly unit, mark down the distance to that square but don't continue the bfs
+					// through that square
+					if (!hasFriendlyUnit[ny][nx]) {
+						q.push(BfsState(ny, nx, cur.startingDir));
+					} else {
+						// check if the square is a damaged structure
+						MapLocation nextLoc(myPlanet, nx, ny);
+						if (gc.has_unit_at_location(nextLoc)) {
+							Unit other = gc.sense_unit_at_location(nextLoc);
+							if (other.get_team() == myTeam &&
+									(other.get_unit_type() == Factory || other.get_unit_type() == Rocket)
+									&& other.structure_is_built() && other.get_health() < other.get_max_health()) {
+								dirToMove = directions[cur.startingDir];
+								break;
+							}
+						}
+					}
+				}
+			}
+		}
+
+		if (dirToMove != Center) {
+			// found damaged structure
+			break;
+		}
+	}
+
+	if (dirToMove != Center) {
+		doMoveRobot(unit, dirToMove);
+		//System.out.println("robot at " + unit.get_map_location() + " found nearby blueprint");
+		return true;
+	}
+
+	//System.out.println("robot at " + unit.get_map_location() + " DIDN'T find nearby blueprint");
+	return false;
 }
 
 static bool bfsTowardsBlueprint(Unit& unit) {

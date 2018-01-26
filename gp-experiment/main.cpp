@@ -205,6 +205,8 @@ static int distToEnemyStartingLocs[55][55];
 static int distToNearestEnemyFighter[55][55];
 static int distToNearestFriendlyFighter[55][55];
 
+static int distToWorkerTasks[55][55];
+
 static int numIdleRangers;
 static int numIdleMages;
 
@@ -322,6 +324,7 @@ static bool mageTryToAttack(Unit& unit);
 static void mageTryToBomb(Unit& unit);
 static void tryToHeal(Unit& unit);
 static void multisourceBfsAvoidingUnitsAndDanger (vector<SimpleState>& startingLocs, int resultArr[55][55]);
+static void multisourceBfsAvoidingOnlyImpassableSquares (vector<SimpleState>& startingLocs, int resultArr[55][55]);
 static void multisourceBfsAvoidingNothing (vector<SimpleState>& startingLocs, int resultArr[55][55]);
 static bool doReplicate(Unit& unit);
 static void checkForEnemyUnits (vector<Unit>& allUnits);
@@ -778,6 +781,7 @@ static void init_turn (vector<Unit>& myUnits) {
 	vector<SimpleState> damagedFriendlyHealableUnits;
 	vector<SimpleState> enemyFighters;
 	vector<SimpleState> friendlyFighters;
+	vector<SimpleState> workerTasks;
 	vector<Unit> units = gc.get_units();
 
 	fo(i, 0, SZ(units)) {
@@ -793,6 +797,16 @@ static void init_turn (vector<Unit>& myUnits) {
 
 				if (is_structure(unit.get_unit_type())) {
 					hasFriendlyStructure[loc.get_y()][loc.get_x()] = true;
+
+					if (unit.structure_is_built()) {
+						if (unit.get_health() < unit.get_max_health()) {
+							// damaged structure
+							workerTasks.push_back(SimpleState(loc.get_y(), loc.get_x()));
+						}
+					} else {
+						// not completed blueprint
+						workerTasks.push_back(SimpleState(loc.get_y(), loc.get_x()));
+					}
 				}
 
 				if (is_healable_unit_type(unit.get_unit_type()) && unit.get_health() < unit.get_max_health()) {
@@ -947,6 +961,9 @@ static void init_turn (vector<Unit>& myUnits) {
 		}
 	}
 	multisourceBfsAvoidingUnitsAndDanger(karboniteLocs, distToKarbonite);
+
+	// calculate distances to worker tasks
+	multisourceBfsAvoidingOnlyImpassableSquares(workerTasks, distToWorkerTasks);
 
 	// calculate distances to damaged healable friendly units
 	multisourceBfsAvoidingUnitsAndDanger(damagedFriendlyHealableUnits, distToDamagedFriendlyHealableUnit);
@@ -1399,6 +1416,15 @@ static void runEarthWorker (Unit& unit) {
 	} else {
 		doBlueprintMovement(unit, doneMove);
 		doKarboniteMovement(unit, doneMove);
+	}
+
+	// otherwise move to a worker task, ignoring danger, if there is one
+	if (!doneMove) {
+		MapLocation loc = unit.get_map_location();
+		if (distToWorkerTasks[loc.get_y()][loc.get_x()] != MultisourceBfsUnreachableMax) {
+			tryMoveToLoc(unit, distToWorkerTasks);
+			doneMove = true;
+		}
 	}
 
 	if (!doneMove) {
@@ -3029,6 +3055,43 @@ static void multisourceBfsAvoidingUnitsAndDanger (vector<SimpleState>& startingL
 			int nx = cur.x + dx[d];
 			if (0 <= ny && ny < height && 0 <= nx && nx < width &&
 					isPassable[ny][nx] && !isSquareDangerous[ny][nx] && resultArr[ny][nx] == MultisourceBfsUnreachableMax) {
+				resultArr[ny][nx] = resultArr[cur.y][cur.x] + 1;
+
+				// if the next square has a friendly unit, mark down the distance to that square but don't continue the bfs
+				// through that square
+				//if (!hasFriendlyUnit[ny][nx])
+
+				q.push(SimpleState(ny, nx));
+			}
+		}
+	}
+}
+
+static void multisourceBfsAvoidingOnlyImpassableSquares (vector<SimpleState>& startingLocs, int resultArr[55][55]) {
+	// Copied from multisourceBfsAvoidingUnitsAndDanger
+	// except that function doesn't actually avoid units
+	// and this function doesn't avoid units or danger
+
+	for (int y = 0; y < height; y++) for (int x = 0; x < width; x++) {
+		resultArr[y][x] = MultisourceBfsUnreachableMax;
+	}
+	queue<SimpleState> q;
+
+	for (int i = 0; i < startingLocs.size(); i++) {
+		SimpleState loc = startingLocs[i];
+		resultArr[loc.y][loc.x] = 0;
+		q.push(SimpleState(loc.y, loc.x));
+	}
+
+	while (!q.empty()) {
+		SimpleState cur = q.front();
+		q.pop();
+
+		for (int d = 0; d < 8; d++) {
+			int ny = cur.y + dy[d];
+			int nx = cur.x + dx[d];
+			if (0 <= ny && ny < height && 0 <= nx && nx < width &&
+					isPassable[ny][nx] && resultArr[ny][nx] == MultisourceBfsUnreachableMax) {
 				resultArr[ny][nx] = resultArr[cur.y][cur.x] + 1;
 
 				// if the next square has a friendly unit, mark down the distance to that square but don't continue the bfs
