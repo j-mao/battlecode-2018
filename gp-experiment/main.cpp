@@ -1848,7 +1848,7 @@ static void runFactory (Unit& unit) {
 	// TODO: maybe make knights past round 150, but maybe not. Who knows what the meta is now.
 	// Don't check for knights past round 150 to save time or something
 	bool done_choice = false;
-	if (roundNum <= 210) {
+	if (roundNum <= 180) {
 		// danger units = fighting units or factories
 		int enemyFactories, friendlyK, enemyK;
 		std::tie(enemyFactories, friendlyK, enemyK) = factoryGetNearbyStuff(unit);
