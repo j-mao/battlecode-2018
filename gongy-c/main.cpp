@@ -552,6 +552,7 @@ int main() {
 		  gc.queue_research(Worker);
 		  gc.queue_research(Rocket);
 		  gc.queue_research(Rocket);*/
+		gc.queue_research(Worker);
 		gc.queue_research(Healer);
 		gc.queue_research(Healer);
 		gc.queue_research(Healer);
