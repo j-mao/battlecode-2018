@@ -193,6 +193,9 @@ static bool reachedCentre;
 static bool isCentreSquare[55][55];
 // this is the dist array (from multisourceBfs) to the closest karbonite square that is a "centre" square
 static int distToCentreKarbonite[55][55];
+// When a worker is replicating towards the centre but currently does not have enough karbonite,
+// it sets this to reserve some of the karbonite so that other workers don't use it to replicate themselves
+static int karb_needed_to_save_for_centre_replication;
 
 static int time_since_damaged_unit[55][55];
 static bool is_good_healer_position[55][55];
@@ -800,6 +803,8 @@ static void init_turn (vector<Unit>& myUnits) {
 	}
 	// reset the amount of centre karbonite "left" over
 	centreKarboniteLeft = centreKarbonite;
+	// reset the amount of karbonite that replicating workers have reserved
+	karb_needed_to_save_for_centre_replication = 0;
 
 	// Research
 	ResearchInfo research_info = gc.get_research_info();
@@ -1622,7 +1627,8 @@ static void runEarthWorker (Unit& unit) {
 	if (is_very_early_game && roundNum <= 50 && !reachedCentre) {
 		// see doKarboniteMovement for more info on this if statement which checks whether it's worth it
 		// to replicate towards centre karbonite
-		if (centreKarboniteLeft > howMuchCentreKarbToBeWorthIt(distToCentreKarbonite[loc.get_y()][loc.get_x()])) {
+		if (distToCentreKarbonite[loc.get_y()][loc.get_x()] != MultisourceBfsUnreachableMax &&
+			centreKarboniteLeft > howMuchCentreKarbToBeWorthIt(distToCentreKarbonite[loc.get_y()][loc.get_x()])) {
 			replicateForCentreKarbonite = true;
 		}
 	}
@@ -1637,11 +1643,17 @@ static void runEarthWorker (Unit& unit) {
 		shouldReplicate = false;
 	}
 
-	if (!doneAction && unit.get_ability_heat() < 10 && shouldReplicate) {
+	bool did_replicate = false;
+	// Warning: constant used (worker replication cost)
+	if (!doneAction && unit.get_ability_heat() < 10 && shouldReplicate && gc.get_karbonite() >= 60 + karb_needed_to_save_for_centre_replication) {
 		// try to replicate
 		if (doReplicate(unit)) {
 			doneAction = true;
+			did_replicate = true;
 		}
+	}
+	if (replicateForCentreKarbonite && !did_replicate) {
+		karb_needed_to_save_for_centre_replication += 60;
 	}
 
 	// Build before blueprinting so that we don't lay down a bunch of blueprints while we haven't even finished one factory
@@ -3360,7 +3372,8 @@ static bool doReplicate(Unit& unit) {
 
 		// see doKarboniteMovement for more info on this if statement which checks whether it's worth it
 		// to replicate towards centre karbonite
-		if (centreKarboniteLeft > howMuchCentreKarbToBeWorthIt(distToCentreKarbonite[cur_loc.get_y()][cur_loc.get_x()])) {
+		if (distToCentreKarbonite[cur_loc.get_y()][cur_loc.get_x()] != MultisourceBfsUnreachableMax &&
+			centreKarboniteLeft > howMuchCentreKarbToBeWorthIt(distToCentreKarbonite[cur_loc.get_y()][cur_loc.get_x()])) {
 			// let's do it
 
 			// take our chunk from centreKarboniteLeft, because it's now less worth it for other workers to also
@@ -4114,7 +4127,8 @@ static void doKarboniteMovement(Unit &unit, bool &doneMove) {
 			// because each turn you make 1 move and 1 replicate.
 			// Warning: constant used (replicate cost)
 			// We'll say it's worth it if the centreKarboniteLeft is greater than the cost of replicating all those workers
-			if (centreKarboniteLeft > howMuchCentreKarbToBeWorthIt(distToCentreKarbonite[loc.get_y()][loc.get_x()])) {
+			if (distToCentreKarbonite[loc.get_y()][loc.get_x()] != MultisourceBfsUnreachableMax &&
+				centreKarboniteLeft > howMuchCentreKarbToBeWorthIt(distToCentreKarbonite[loc.get_y()][loc.get_x()])) {
 				// don't modify the centreKarboniteLeft yet
 				// we'll do that in doReplicate
 				tryMoveToLoc(unit, distToCentreKarbonite);
