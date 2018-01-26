@@ -208,7 +208,6 @@ static bool has_blink_researched;
 
 // we are ready to build mages once we have overcharge, or once we are "close" to getting overcharge
 static const unsigned CLOSE_TO_RESEARCH_DONE = 40; // 40 turns
-static bool ready_for_mages;
 
 static const int MultisourceBfsUnreachableMax = 499;
 static bool can_reach_from_spawn[55][55];
@@ -228,6 +227,8 @@ static const int MageAttackRange = 30;
 static const int MageReadyToBlinkRange = 80;
 // distance you have to be to be a single move away from mage attack range
 static const int OneMoveFromMageAttackRange = 45;
+// distance you have to be to be two moves away from mage attack range
+static const int TwoMovesFromMageAttackRange = 63;
 
 // Distance around a worker to search for whether there is enough karbonite to be worth replicating
 static int IsEnoughResourcesNearbySearchDist = 8;
@@ -297,6 +298,7 @@ static int getMageAttackPriority(Unit& unit);
 static int getKnightAttackPriority(Unit& unit);
 static bool rangerTryToAttack(Unit& unit);
 static bool mageTryToAttack(Unit& unit);
+static void mageTryToBomb(Unit& unit);
 static void tryToHeal(Unit& unit);
 static void multisourceBfsAvoidingUnitsAndDanger (vector<SimpleState>& startingLocs, int resultArr[55][55]);
 static void multisourceBfsAvoidingNothing (vector<SimpleState>& startingLocs, int resultArr[55][55]);
@@ -480,29 +482,27 @@ int main() {
 			roundNum++;
 		}
 	} else {
-		gc.queue_research(Worker);
-		gc.queue_research(Ranger);
-		gc.queue_research(Healer);
-		gc.queue_research(Healer);
-		gc.queue_research(Healer);
-		gc.queue_research(Mage);
-		gc.queue_research(Mage);
-		gc.queue_research(Rocket);
-		gc.queue_research(Ranger);
-		gc.queue_research(Worker);
-		gc.queue_research(Worker);
-		gc.queue_research(Worker);
-		gc.queue_research(Rocket);
-		// Currently this last rocket upgrade is useless because we get it on round 750 xd.
-		// But whatever 4Head.
-		gc.queue_research(Rocket);
 		/*gc.queue_research(Worker);
 		gc.queue_research(Ranger);
 		gc.queue_research(Healer);
 		gc.queue_research(Healer);
-		gc.queue_research(Healer); // overcharge
+		gc.queue_research(Healer);
+		gc.queue_research(Mage);
+		gc.queue_research(Mage);
+		gc.queue_research(Rocket);
 		gc.queue_research(Ranger);
-		gc.queue_research(Worker);*/
+		gc.queue_research(Worker);
+		gc.queue_research(Worker);
+		gc.queue_research(Worker);
+		gc.queue_research(Rocket);
+		gc.queue_research(Rocket);*/
+		gc.queue_research(Healer);
+		gc.queue_research(Healer);
+		gc.queue_research(Healer);
+		gc.queue_research(Mage);
+		gc.queue_research(Mage);
+		gc.queue_research(Mage);
+		gc.queue_research(Mage);
 
 		int total_time = 0;
 		int prev_time_left_ms = gc.get_time_left_ms();
@@ -739,19 +739,6 @@ static void init_turn (vector<Unit>& myUnits) {
 	if (!has_blink_researched) {
 		has_blink_researched = research_info.get_level(Mage) >= 4;
 	}
-	if (!ready_for_mages) {
-		// healer is already level 2
-		if (research_info.get_level(Healer) >= 2) {
-			// healer is going to level 3
-			if (research_info.has_next_in_queue() && research_info.next_in_queue() == Healer) {
-				// healer level 3 upgrade nearly done
-				if (research_info.rounds_left() <= CLOSE_TO_RESEARCH_DONE) {
-					ready_for_mages = true;
-				}
-			}
-		}
-	}
-
 	//reset unit counts
 	numWorkers = 0; numKnights = 0; numRangers = 0; numMages = 0; numHealers = 0; numFactories = 0; numRockets = 0;
 	numFactoryBlueprints = 0; numRocketBlueprints = 0;
@@ -1536,12 +1523,20 @@ static void runFactory (Unit& unit) {
  			unitTypeToBuild = Ranger;
  		} else if (numWorkers == 0) {
  			unitTypeToBuild = Worker;
- 		} else if (numRangers >= 2 * numHealers + 4) {
- 			unitTypeToBuild = Healer;
- 		} else if (numKnights < 5) {
- 			unitTypeToBuild = Knight;
-		} else if (ready_for_mages && numHealers >= 2 * numMages) {
- 			unitTypeToBuild = Mage;
+ 		} else if (!has_overcharge_researched) {
+			// early game priorities
+			if (numRangers >= 2 * numHealers + 4) {
+				unitTypeToBuild = Healer;
+			}
+		} else if (has_overcharge_researched) {
+			// reduce rangers so that we can get healers and mages out there
+			if (numRangers*2 < good_ranger_positions.size()*3) {
+				unitTypeToBuild = Ranger;
+			} else if (numHealers*2 > 3*numMages) {
+				unitTypeToBuild = Mage;
+			} else {
+				unitTypeToBuild = Healer;
+			}
 		}
  	}
 
@@ -1787,7 +1782,12 @@ static void runMage (Unit& unit) {
 		int myX = unit.get_map_location().get_x();
 
 		// Warning: Constant being used. Change this constant
-		if (!doneMove && attackDistanceToEnemy[myY][myX] <= MageReadyToBlinkRange) {
+		if (!doneMove &&
+			// we can blink so we can be far
+			((attackDistanceToEnemy[myY][myX] <= MageReadyToBlinkRange && has_blink_researched) ||
+			// do not want to be too far if we cant blink
+			 attackDistanceToEnemy[myY][myX] <= TwoMovesFromMageAttackRange))
+		{
 			// if near enemies, do fighting movement
 
 			// somehow decide whether to move forward or backwards
@@ -1872,19 +1872,20 @@ static void runMage (Unit& unit) {
 						unit = gc.get_unit(unit.get_id());
 						clock_t after_gc_get_unit = clock();
 						gc_get_unit_stats.add(get_microseconds(before_gc_get_unit, after_gc_get_unit));
+						myY = unit.get_map_location().get_y();
+						myX = unit.get_map_location().get_x();
 
 					}
 				}
-				if (!has_blink_researched && attackDistanceToEnemy[myY][myX] > OneMoveFromMageAttackRange) {
-					// we are too far away but cannot blink, so overcharge to move
-					// only do this if blink is not researched; using overcharge to suicide a mage that can blink is silly
+				if (attackDistanceToEnemy[myY][myX] > MageAttackRange) {
+					// use overcharge to get closer
 					std::vector<std::pair<int, int>> available_overcharge_list;
 					get_available_overcharges_in_range(unit, available_overcharge_list);
 					MapLocation resultantLocation(unit.get_map_location());
 					vector<Direction> moveDirs;
 					vector<size_t> whoIsOvercharging;
 					for (size_t i = 0; i < available_overcharge_list.size(); i++) {
-						if (attackDistanceToEnemy[resultantLocation.get_y()][resultantLocation.get_x()] <= OneMoveFromMageAttackRange) {
+						if (attackDistanceToEnemy[resultantLocation.get_y()][resultantLocation.get_x()] <= MageAttackRange) {
 							break;
 						}
 						shuffleDirOrder();
@@ -1914,7 +1915,7 @@ static void runMage (Unit& unit) {
 						whoIsOvercharging.push_back(i);
 						resultantLocation = resultantLocation.add(directions[randDirOrder[best]]);
 					}
-					if (attackDistanceToEnemy[resultantLocation.get_y()][resultantLocation.get_x()] <= OneMoveFromMageAttackRange) {
+					if (attackDistanceToEnemy[resultantLocation.get_y()][resultantLocation.get_x()] <= MageAttackRange) {
 						// a path was found; lets do this
 						for (size_t i = 0; i < moveDirs.size(); i++) {
 							// the final argument forces the move to occur, whether or not caches were corrupted
@@ -1922,40 +1923,17 @@ static void runMage (Unit& unit) {
 							doMoveRobot(unit, moveDirs[i], true);
 							// update location
 							unit = gc.get_unit(unit.get_id());
+							myY = unit.get_map_location().get_y();
+							myX = unit.get_map_location().get_x();
 							mageTryToAttack(unit); // attack for free
 							if (doOvercharge(available_overcharge_list[whoIsOvercharging[i]], unit)) {
 							}
 						}
 					}
 				}
-				// do a move to attack
-				myY = unit.get_map_location().get_y();
-				myX = unit.get_map_location().get_x();
-				if (attackDistanceToEnemy[myY][myX] <= OneMoveFromMageAttackRange) {
-					int best = -1, bestNumEnemies = 999;
-					shuffleDirOrder();
-					for (int i = 0; i < 8; i++) {
-						Direction dir = directions[randDirOrder[i]];
-						MapLocation loc = unit.get_map_location().add(dir);
-						if (0 <= loc.get_y() && loc.get_y() < height &&
-								0 <= loc.get_x() && loc.get_x() < width &&
-								attackDistanceToEnemy[loc.get_y()][loc.get_x()] <= MageAttackRange &&
-								gc.can_move(unit.get_id(), dir)) {
-							int numEnemies = numEnemiesThatCanAttackSquare[loc.get_y()][loc.get_x()];
-							if (numEnemies < bestNumEnemies) {
-								best = i;
-								bestNumEnemies = numEnemies;
-							}
-						}
-					}
-
-					if (best != -1) {
-						Direction dir = directions[randDirOrder[best]];
-						doMoveRobot(unit, dir, true);
-						unit = gc.get_unit(unit.get_id());
-						doneMove = true;
-					}
-				}
+			}
+			if (attackDistanceToEnemy[myY][myX] <= MageAttackRange) {
+				mageTryToBomb(unit);
 			}
 
 			if (doneMove) {
@@ -2583,7 +2561,7 @@ static bool mageTryToAttack(Unit& unit) {
 			while (!available_overcharge_list.empty() && gc.can_sense_unit(units[whichToAttack].get_id())) {
 				// is it worth requesting overcharge to go again?
 				bool worthAnOvercharge = false;
-				int kills = 0;
+				int hits = 0;
 				for (int y = std::max(0, theirLoc.get_y() - 1); y <= std::min(height - 1, theirLoc.get_y() + 1); y++) {
 					for (int x = std::max(0, theirLoc.get_x() - 1); x <= std::min(width - 1, theirLoc.get_x() + 1); x++) {
 						// take into account the damage just dealt
@@ -2594,13 +2572,11 @@ static bool mageTryToAttack(Unit& unit) {
 							}
 						}
 						if (hasEnemyUnit[y][x]) {
-							if (enemyUnitHealth[y][x] <= unit.get_damage()) {
-								kills++;
-							}
+							hits++;
 						}
 					}
 				}
-				if (kills >= 3) {
+				if (hits >= 3) {
 					worthAnOvercharge = true;
 				}
 				if (worthAnOvercharge) {
@@ -2615,6 +2591,71 @@ static bool mageTryToAttack(Unit& unit) {
 		}
 	}
 	return false;
+}
+
+// calculates the value of a mage-bomb coming here
+// Requirement: the hasEnemyUnit cache is up to date
+int calcNumMageHitsFrom(int y, int x) {
+	int result = 0;
+	// warning: constants
+	for (int hy = std::max(0, y - 5); hy <= std::min(height - 1, y + 5); hy++) {
+		for (int hx = std::max(0, x - 5); hx <= std::min(width - 1, x + 5); hx++) {
+			if (hasEnemyUnit[y][x]) { // try hitting here
+				int dist = distance_squared(hy - y, hx - x);
+				if (dist <= MageAttackRange) {
+					int alt = 0;
+					for (int sy = max(0, hy - 1); sy <= min(height - 1, hy + 1); sy++) {
+						for (int sx = max(0, hx - 1); sx <= min(height - 1, hx + 1); sx++) {
+							if (hasEnemyUnit[sy][sx]) { // splash
+								alt++;
+							}
+						}
+					}
+					result = max(result, alt);
+				}
+			}
+		}
+	}
+	return result;
+}
+
+// does a mage bomb
+// it attacks, finds somewhere to overcharge to, and tries to attack again. repeat.
+// Requirement: the unit object is up to date
+// Requirement: the unit has just been overcharged and thus has zero heat
+void mageTryToBomb(Unit &unit) {
+	mageTryToAttack(unit);
+	int absDist = 1;
+	if (gc.is_blink_ready(unit.get_id())) {
+		absDist = 2;
+	}
+	vector<pair<int, int> > available_overcharge_list;
+	get_available_overcharges_in_range(unit, available_overcharge_list);
+	if (available_overcharge_list.size() == 0) {
+		return;
+	}
+	MapLocation loc(unit.get_map_location());
+	MapLocation best(nullMapLocation);
+	int bestValue = -1;
+	for (int y = std::max(0, loc.get_y() - absDist); y <= std::min(height - 1, loc.get_y() + absDist); y++) {
+		for (int x = std::max(0, loc.get_x() - absDist); x <= std::min(width - 1, loc.get_x() + absDist); x++) {
+			int value = calcNumMageHitsFrom(y, x);
+			if (value < bestValue) {
+				best = MapLocation(myPlanet, x, y);
+				bestValue = value;
+			}
+		}
+	}
+	if (bestValue >= 4) {
+		if (absDist == 1) {
+			doMoveRobot(unit, loc.direction_to(best));
+		} else {
+			doBlinkRobot(unit, best);
+		}
+		unit = gc.get_unit(unit.get_id());
+		doOvercharge(available_overcharge_list.back(), unit);
+		mageTryToBomb(unit);
+	}
 }
 
 // returns whether the healer successfully healed
