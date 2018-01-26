@@ -1956,9 +1956,11 @@ static void runRanger (Unit& unit) {
 						int attackDist = attackDistanceToEnemy[loc.get_y()][loc.get_x()];
 						if (numEnemies < bestNumEnemies ||
 								(numEnemies == bestNumEnemies && attackDist > bestAttackDist)) {
-							best = i;
-							bestNumEnemies = numEnemies;
-							bestAttackDist = attackDist;
+							if (gc.can_move(unit.get_id(), dir)) {
+								best = i;
+								bestNumEnemies = numEnemies;
+								bestAttackDist = attackDist;
+							}
 						}
 					}
 				}
