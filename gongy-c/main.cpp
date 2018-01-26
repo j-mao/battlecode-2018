@@ -1282,15 +1282,17 @@ static void runEarthWorker (Unit& unit) {
 	// hard code not building factory on round 1 so that we can replicate
 	if (roundNum > 1 && !doneAction) {
 		// if you can blueprint factory/rocket and want to blueprint factory/rocket...
-		if (gc.get_karbonite() >= 100 &&
+		if (gc.get_karbonite() >= 200 &&
 				(numFactories + numFactoryBlueprints < 3 ||
-				 gc.get_karbonite() >= 130 + (numFactories + numFactoryBlueprints - 3) * 15)) {
+				 gc.get_karbonite() >= 260 + (numFactories + numFactoryBlueprints - 3) * 30)) {
 
 			if (doBlueprint(unit, Factory)) {
 				doneAction = true;
 			}
 		} else if (canRocket && lowRockets) {
-
+			if (gc.get_karbonite()>=150){
+				DEBUG_OUTPUT("calling doBlueprint with Rocket and karbonite = %d\n", gc.get_karbonite());
+			}
 			if (doBlueprint(unit, Rocket)) {
 				doneAction = true;
 			}
@@ -1479,8 +1481,8 @@ static void runFactory (Unit& unit) {
 
 	bool canRocket = get_can_rocket();
 	bool lowRockets = ((int) rockets_to_fill.size() + numRocketBlueprints < maxConcurrentRocketsReady);
-	int unitCost = (unitTypeToBuild == Worker ? 25 : 20);
-	bool needToSave = (gc.get_karbonite() < 75 + unitCost);
+	int unitCost = (unitTypeToBuild == Worker ? 50 : 40);
+	bool needToSave = (gc.get_karbonite() < 150 + unitCost);
 
 	if (canRocket && lowRockets && needToSave) {
 		return;
