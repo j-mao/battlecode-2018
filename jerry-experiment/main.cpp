@@ -1897,7 +1897,7 @@ static void runFactory (Unit& unit) {
 			// reduce rangers so that we can get healers and mages out there
 			if (numRangers*2 < good_ranger_positions.size()*3) {
 				unitTypeToBuild = Ranger;
-			} else if (numHealers*2 > 3*numMages) {
+			} else if (numMages < 3) {
 				unitTypeToBuild = Mage;
 			} else {
 				unitTypeToBuild = Healer;
