@@ -552,6 +552,7 @@ int main() {
 		  gc.queue_research(Worker);
 		  gc.queue_research(Rocket);
 		  gc.queue_research(Rocket);*/
+		gc.queue_research(Worker);
 		gc.queue_research(Healer);
 		gc.queue_research(Healer);
 		gc.queue_research(Healer);
@@ -726,7 +727,7 @@ int main() {
 					last_round_idle = roundNum;
 				}
 				if (last_round_idle == roundNum) {
-					// printf("Round %d idle\n", roundNum);
+					// DEBUG_OUTPUT("Round %d idle\n", roundNum);
 				}
 			}
 
@@ -742,6 +743,15 @@ static void init_turn (vector<Unit>& myUnits) {
 
 	factoriesBeingBuilt.clear();
 	rocketsBeingBuilt.clear();
+
+	if (myPlanet == Mars) {
+		// check for asteroids
+		if (gc.get_asteroid_pattern().has_asteroid_on_round(roundNum)) {
+			AsteroidStrike asteroid = gc.get_asteroid_pattern().get_asteroid_on_round(roundNum);
+			MapLocation where = asteroid.get_map_location();
+			lastKnownKarboniteAmount[where.get_y()][where.get_x()] += asteroid.get_karbonite();
+		}
+	}
 
 	for (int i = 0; i < myUnits.size(); i++) {
 		Unit& unit = myUnits[i];
@@ -1465,7 +1475,7 @@ static bool doOvercharge (const std::pair<int, int> &healer_loc, Unit &unit_to_o
 
 	// rip can_overcharge doesn't exist...
 	// I guess we'll just always return true and hope that it doesn't crash
-	// printf("healer at %d %d overcharging unit at %d %d\n", loc_x, loc_y, unit_to_overcharge.get_map_location().get_x(), unit_to_overcharge.get_map_location().get_y());
+	// DEBUG_OUTPUT("healer at %d %d overcharging unit at %d %d\n", loc_x, loc_y, unit_to_overcharge.get_map_location().get_x(), unit_to_overcharge.get_map_location().get_y());
 	gc.overcharge(healer_id, unit_to_overcharge.get_id());
 
 	// remove available overcharge
@@ -1719,7 +1729,7 @@ static void runEarthWorker (Unit& unit) {
 			}
 		}
 		if (best != -1) {
-			//printf("harvesting!\n");
+			//DEBUG_OUTPUT("harvesting!\n");
 			gc.harvest(unit.get_id(), directions[best]);
 			MapLocation loc = unit.get_map_location().add(directions[best]);
 			lastKnownKarboniteAmount[loc.get_y()][loc.get_x()] = gc.get_karbonite_at(loc);
@@ -2863,7 +2873,7 @@ static bool rangerTryToAttack(Unit& unit) {
 				if (gc.can_sense_unit(units[enemy_index].get_id())) {
 					DEBUG_OUTPUT("Error: Ranger thought it one shot a unit with a bunch of overcharge, but it didnt!\n");
 				} else {
-					// printf("Yay, one shot worked on unit at %d %d!\n", units[enemy_index].get_map_location().get_x(), units[enemy_index].get_map_location().get_y());
+					// DEBUG_OUTPUT("Yay, one shot worked on unit at %d %d!\n", units[enemy_index].get_map_location().get_x(), units[enemy_index].get_map_location().get_y());
 				}
 			}
 		}
@@ -4070,7 +4080,7 @@ static bool knight_bfs_to_enemy_unit(Unit &unit) {
 
 		if (hasEnemyUnit[cur_y][cur_x]) {
 			if (cur_starting_dir == DirCenterIndex) {
-				printf("Error in knight bfs!");
+				DEBUG_OUTPUT("Error in knight bfs!");
 			} else {
 				doMoveRobot(unit, directions[cur_starting_dir]);
 			}
