@@ -2222,6 +2222,13 @@ static void runMage (Unit& unit) {
 	clock_t after_attack = clock();
 	mage_attack_stats.add(get_microseconds(before_attack, after_attack));
 
+	// TODO : make sure mages don't actually commit suicide
+	// but for now, just ignore if they do
+
+	if (!gc.can_sense_unit(unit.get_id())) {
+		return;
+	}
+
 	// decide movement
 	if (unit.is_on_map() && gc.is_move_ready(unit.get_id())) {
 		bool doneMove = false;
