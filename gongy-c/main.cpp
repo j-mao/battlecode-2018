@@ -166,6 +166,7 @@ static int attackDistanceToEnemy[55][55];
 static int attackDistanceToEnemyRanger[55][55];
 static int attackDistanceToEnemyMage[55][55];
 static int attackDistanceToEnemyKnight[55][55];
+static int moveDistanceToEnemyKnight[55][55];
 // good positions are squares which are some distance from the enemy.
 // e.g. distance [51, 72] from the closest enemy (this might be changed later...)
 // Warning: random constants being used. Need to be changed if constants change!
@@ -813,6 +814,7 @@ static void init_turn (vector<Unit>& myUnits) {
 			attackDistanceToEnemyRanger[y][x] = 9999;
 			attackDistanceToEnemyMage[y][x] = 9999;
 			attackDistanceToEnemyKnight[y][x] = 9999;
+			moveDistanceToEnemyKnight[y][x] = 9999;
 			is_good_ranger_position[y][x] = false;
 			is_good_ranger_position_taken[y][x] = false;
 			isSquareDangerous[y][x] = false;
@@ -1027,6 +1029,7 @@ static void init_turn (vector<Unit>& myUnits) {
 								attackDistanceToEnemyMage[y][x] = min(attackDistanceToEnemyMage[y][x], myDist);
 							} else if (unit_type == Knight) {
 								attackDistanceToEnemyKnight[y][x] = min(attackDistanceToEnemyKnight[y][x], myDist);
+								moveDistanceToEnemyKnight[y][x] = min(moveDistanceToEnemyKnight[y][x], dis[locY][locX][y][x]);
 							}
 							if (myDist <= unit.get_attack_range()) {
 								numEnemiesThatCanAttackSquare[y][x]++;
@@ -1106,7 +1109,9 @@ static void init_turn (vector<Unit>& myUnits) {
 
 	good_mage_positions.clear();
 	fo(y, 0, height) fo(x, 0, width) {
-		if (RangerAttackRange < attackDistanceToEnemy[y][x] && attackDistanceToEnemy[y][x] <= MageReadyToBlinkRange) {
+		if (RangerAttackRange < attackDistanceToEnemyRanger[y][x] &&
+				attackDistanceToEnemy[y][x] <= MageReadyToBlinkRange &&
+				moveDistanceToEnemyKnight[y][x] >= 4) {
 			is_good_mage_position[y][x] = true;
 			good_mage_positions.push_back(make_pair(y, x));
 		}
@@ -2229,6 +2234,8 @@ static void runMage (Unit& unit) {
 		return;
 	}
 
+	printf("see mage id %d\n", unit.get_id());
+
 	// decide movement
 	if (unit.is_on_map() && gc.is_move_ready(unit.get_id())) {
 		bool doneMove = false;
@@ -2249,12 +2256,20 @@ static void runMage (Unit& unit) {
 		{
 			// if near enemies, do fighting movement
 
+			DEBUG_OUTPUT("Mage is close at %d %d attack distance is %d and mage attack range %d\n", myY, myX, attackDistanceToEnemy[myY][myX], MageAttackRange);
+
+
 			// somehow decide whether to move forward or backwards
 			if (attackDistanceToEnemy[myY][myX] <= MageAttackRange) {
 				// currently in range of enemy
 
 				// find which square would be best to kite to (even if your movement is currently on cd)
-				int best = -1, bestNumEnemies = 999, bestAttackDist = -1;
+				// initialise with your current situation (i.e. not moving)
+
+				int best = -1;
+				int bestNumEnemies = numEnemiesThatCanAttackSquare[myY][myX];
+				int bestAttackDist = attackDistanceToEnemy[myY][myX];
+
 				for (int i = 0; i < 8; i++) {
 					Direction dir = directions[i];
 					MapLocation loc = unit.get_map_location().add(dir);
@@ -2274,7 +2289,7 @@ static void runMage (Unit& unit) {
 				if (doneAttack) {
 					// just completed an attack, move backwards now to kite if you can
 
-					if (best != -1 && bestNumEnemies < numEnemiesThatCanAttackSquare[myY][myX]) {
+					if (best != -1) {
 						// System.out.println("kiting backwards!");
 						doMoveRobot(unit, directions[best]);
 
@@ -2290,13 +2305,22 @@ static void runMage (Unit& unit) {
 					doneMove = true;
 
 				} else {
-					// wait for your next attack before kiting back, so don't move yet
 					doneMove = true;
+
+					// move while remaining in attack range so you can attack again soon
 
 					// if the square you want to kite to is a good position, mark it as taken
 					// (same code as the if() clause, but just don't move)
-					if (best != -1 && bestNumEnemies < numEnemiesThatCanAttackSquare[myY][myX]) {
+					if (best != -1) {
+						// if moving away keeps you in attack range, there is no reason not to move away
+						// otherwise, just stay where you are
+
 						MapLocation after_loc = unit.get_map_location().add(directions[best]);
+
+						if (attackDistanceToEnemy[after_loc.get_y()][after_loc.get_x()] <= MageAttackRange) {
+							doMoveRobot(unit, directions[best]);
+						}
+
 						if (is_good_mage_position[after_loc.get_y()][after_loc.get_x()])
 						{
 							is_good_mage_position_taken[after_loc.get_y()][after_loc.get_x()] = true;
@@ -2405,6 +2429,9 @@ static void runMage (Unit& unit) {
 
 		if (!doneMove) {
 			// otherwise, search for a good destination to move towards
+
+
+			DEBUG_OUTPUT("Mage is finding another good destination\n");
 
 			// check if current location is good position
 			if (!doneMove && is_good_mage_position[myY][myX]) {
@@ -3026,7 +3053,9 @@ static bool mageTryToAttack(Unit& unit) {
 					}
 				}
 
-				if (whichToAttack == -1 || (kills>whichToAttackKills) || (kills==whichToAttackKills && attackPriority > whichToAttackPriority)) {
+				// this code prioritised killing a dead factory over a rushing knight
+				// if (whichToAttack == -1 || (kills>whichToAttackKills) || (kills==whichToAttackKills && attackPriority > whichToAttackPriority))
+				if (whichToAttack == -1 || (attackPriority>whichToAttackPriority) || (attackPriority==whichToAttackPriority && kills>whichToAttackKills)) {
 					whichToAttack = i;
 					whichToAttackKills = kills;
 					whichToAttackPriority = attackPriority;
@@ -3471,7 +3500,7 @@ static bool doReplicate(Unit& unit) {
 		// see doKarboniteMovement for more info on this if statement which checks whether it's worth it
 		// to replicate towards centre karbonite
 		if (distToCentreKarbonite[cur_loc.get_y()][cur_loc.get_x()] != MultisourceBfsUnreachableMax &&
-			centreKarboniteLeft > howMuchCentreKarbToBeWorthIt(distToCentreKarbonite[cur_loc.get_y()][cur_loc.get_x()])) {
+				centreKarboniteLeft > howMuchCentreKarbToBeWorthIt(distToCentreKarbonite[cur_loc.get_y()][cur_loc.get_x()])) {
 			// let's do it
 
 			// take our chunk from centreKarboniteLeft, because it's now less worth it for other workers to also
@@ -3498,7 +3527,7 @@ static bool doReplicate(Unit& unit) {
 			if (best != -1) {
 				replicateDir = directions[best];
 				printf("worker at %d %d replicating in dir %d\n", unit.get_map_location().get_x(), unit.get_map_location().get_y(),
-					best);
+						best);
 			}
 		}
 	}
@@ -4245,7 +4274,7 @@ static void doKarboniteMovement(Unit &unit, bool &doneMove) {
 			// Warning: constant used (replicate cost)
 			// We'll say it's worth it if the centreKarboniteLeft is greater than the cost of replicating all those workers
 			if (distToCentreKarbonite[loc.get_y()][loc.get_x()] != MultisourceBfsUnreachableMax &&
-				centreKarboniteLeft > howMuchCentreKarbToBeWorthIt(distToCentreKarbonite[loc.get_y()][loc.get_x()])) {
+					centreKarboniteLeft > howMuchCentreKarbToBeWorthIt(distToCentreKarbonite[loc.get_y()][loc.get_x()])) {
 				// don't modify the centreKarboniteLeft yet
 				// we'll do that in doReplicate
 				tryMoveToLoc(unit, distToCentreKarbonite);
