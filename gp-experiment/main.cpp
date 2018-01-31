@@ -2030,7 +2030,7 @@ static void runFactory (Unit& unit) {
 			unitTypeToBuild = Ranger;
 		} else if (!has_overcharge_researched) {
 			// early game priorities
-			if (numRangers+numMages+numKnights >= 2 * numHealers + 4) {
+			if (numRangers+numMages+numKnights >= 3 * numHealers / 2 + 3) {
 				unitTypeToBuild = Healer;
 			}
 		} else if (has_overcharge_researched) {
@@ -2114,7 +2114,9 @@ static void runRanger (Unit& unit) {
 					}
 				}
 
-				if (doneAttack || attackDistanceToEnemy[myY][myX] <= 36) {
+				if ((doneAttack && unit.get_health() <= 90) ||
+						unit.get_health() <= 60 ||
+						attackDistanceToEnemy[myY][myX] <= 36) {
 					// just completed an attack or we're too close to the enemy
 					// move backwards now to kite if you can
 
@@ -2153,7 +2155,7 @@ static void runRanger (Unit& unit) {
 				}
 			} else {
 				// currently 1 move from being in range of enemy
-				if (!doneAttack && gc.is_attack_ready(unit.get_id()) && is_attack_round) {
+				if (!doneAttack && gc.is_attack_ready(unit.get_id()) && unit.get_health() > 180) {
 					// move into a position where you can attack
 					int best = -1, bestNumEnemies = 999;
 					shuffleDirOrder();
@@ -2172,7 +2174,7 @@ static void runRanger (Unit& unit) {
 						}
 					}
 
-					if (best != -1) {
+					if (best != -1 && bestNumEnemies <= 3) {
 						Direction dir = directions[randDirOrder[best]];
 
 						// mark your current position as yours so other rangers don't try to move there while you're gone
@@ -2205,7 +2207,8 @@ static void runRanger (Unit& unit) {
 				// if there's an closer (or equally close) adjacent good position
 				// and the next attack wave isn't too soon, then move to it
 				bool foundMove = false;
-				if (roundNum % 5 < 3) {
+				// Edit: we're no longer using the "attack every 5 rounds" thing
+				if (true /*roundNum % 5 < 3*/) {
 					shuffleDirOrder();
 					for (int i = 0; i < 8; i++) {
 						Direction dir = directions[randDirOrder[i]];
@@ -2927,6 +2930,11 @@ static int getKnightAttackPriority(Unit& unit){
 // Requriements: Make sure the Unit object is up to date!
 // I.e. you must call gc.get_unit() again if the ranger moves!
 static bool rangerTryToAttack(Unit& unit) {
+	if (roundNum > 150 && roundNum % 20 == 1) {
+		// once we're into the midgame, every ~20 rounds sync up all the ranger attacks
+		return false;
+	}
+
 	if (unit.is_on_map() && gc.is_attack_ready(unit.get_id())) {
 		// this radius needs to be at least 1 square larger than the ranger's attack range
 		// because the ranger might move, but the ranger's unit.get_map_location() won't update unless we
