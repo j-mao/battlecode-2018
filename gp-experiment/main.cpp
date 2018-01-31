@@ -338,6 +338,8 @@ static int numFactories;
 static int numRocketBlueprints;
 static int numRockets;
 
+static int num_enemy_factories_including_blueprints;
+
 static Planet myPlanet;
 static PlanetMap EarthMap;
 static PlanetMap MarsMap;
@@ -1109,9 +1111,11 @@ static void init_turn (vector<Unit>& myUnits) {
 		}
 	}
 
+	num_enemy_factories_including_blueprints = 0;
 	for (int y = 0; y < height; y++) for (int x = 0; x < width; x++) {
 		if (has_enemy_factory_in_memory[y][x]) {
 			enemy_factories.push_back(SimpleState(y, x));
+			num_enemy_factories_including_blueprints++;
 		}
 	}
 
@@ -1846,6 +1850,16 @@ static void runEarthWorker (Unit& unit) {
 	bool shouldReplicate = (replicateForBuilding || replicateForHarvesting || replicateForCentreKarbonite || replicateForRocketRace);
 
 	if (canRocket && lowRockets && needToSave) {
+		shouldReplicate = false;
+	}
+
+	// if we have less than our starting 4 factories
+	// and the enemy has more factories
+	// and we have less than the money required to replicate and build a factory
+	// then don't replicate
+	if (numFactories + numFactoryBlueprints < 4 &&
+			num_enemy_factories_including_blueprints > numFactories + numFactoryBlueprints &&
+			gc.get_karbonite() < 200 + 60) {
 		shouldReplicate = false;
 	}
 
