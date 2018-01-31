@@ -1273,11 +1273,11 @@ static void init_turn (vector<Unit>& myUnits) {
 	}
 
 	// Compare fronts to estimate whether or not we have a concave
-	has_concave_established = (ourFrontSize >= 1.2*theirFrontSize);
+	has_concave_established = (ourFrontSize > 5*theirFrontSize);
 	if (has_concave_established) {
-		printf("Probably winning?\n");
+		DEBUG_OUTPUT("Probably winning?\n");
 	} else {
-		printf("\t\t\t\t\t\tProbably getting rekt?\n");
+		DEBUG_OUTPUT("\t\t\t\t\t\tProbably getting rekt?\n");
 	}
 
 	// attackLoc update
