@@ -1109,9 +1109,11 @@ static void init_turn (vector<Unit>& myUnits) {
 
 	good_mage_positions.clear();
 	fo(y, 0, height) fo(x, 0, width) {
-		if (RangerAttackRange < attackDistanceToEnemyRanger[y][x] &&
-				attackDistanceToEnemy[y][x] <= MageReadyToBlinkRange &&
-				moveDistanceToEnemyKnight[y][x] >= 4) {
+		bool safeFromEnemy = (RangerAttackRange < attackDistanceToEnemyRanger[y][x]) &&
+			(MageAttackRange < attackDistanceToEnemyMage[y][x]) &&
+			(moveDistanceToEnemyKnight[y][x] >= 4);
+
+		if (safeFromEnemy && attackDistanceToEnemy[y][x] <= MageReadyToBlinkRange) {
 			is_good_mage_position[y][x] = true;
 			good_mage_positions.push_back(make_pair(y, x));
 		}
@@ -1157,7 +1159,11 @@ static void init_turn (vector<Unit>& myUnits) {
 	//    (This gets rid of those "unreachable", misleading "good positions" that are on the other side of their army)
 	good_ranger_positions.clear();
 	for (int y = 0; y < height; y++) for (int x = 0; x < width; x++) {
-		if (RangerAttackRange < attackDistanceToEnemy[y][x] && attackDistanceToEnemy[y][x] <= OneMoveFromRangerAttackRange &&
+		bool safeFromEnemy = (RangerAttackRange < attackDistanceToEnemyRanger[y][x]) &&
+			(MageAttackRange < attackDistanceToEnemyMage[y][x]) &&
+			(moveDistanceToEnemyKnight[y][x] >= 4);
+
+		if (safeFromEnemy && attackDistanceToEnemy[y][x] <= OneMoveFromRangerAttackRange &&
 				distToNearestEnemyFighter[y][x] >= distToNearestFriendlyFighter[y][x] &&
 				isPassable[y][x]) {
 			is_good_ranger_position[y][x] = true;
@@ -1719,7 +1725,7 @@ static void runEarthWorker (Unit& unit) {
 		// see doKarboniteMovement for more info on this if statement which checks whether it's worth it
 		// to replicate towards centre karbonite
 		if (distToCentreKarbonite[loc.get_y()][loc.get_x()] != MultisourceBfsUnreachableMax &&
-			centreKarboniteLeft > howMuchCentreKarbToBeWorthIt(distToCentreKarbonite[loc.get_y()][loc.get_x()])) {
+				centreKarboniteLeft > howMuchCentreKarbToBeWorthIt(distToCentreKarbonite[loc.get_y()][loc.get_x()])) {
 			replicateForCentreKarbonite = true;
 		}
 	}
@@ -1953,6 +1959,7 @@ static void runFactory (Unit& unit) {
 	bool done_choice = false;
 	if (roundNum <= 180) {
 
+
 		bool my_knight_rush = can_rush_enemy && roundNum <= 80;
 
 		// danger units = fighting units or factories
@@ -1962,6 +1969,12 @@ static void runFactory (Unit& unit) {
 			unitTypeToBuild = Knight;
 			done_choice = true;
 		}
+        
+        /*
+		unitTypeToBuild = Mage;
+		done_choice = true;
+        */
+
 	}
 	if (!done_choice) {
 		if (numWorkers == 0 || call_for_fresh_workers) {
@@ -1971,7 +1984,7 @@ static void runFactory (Unit& unit) {
 			unitTypeToBuild = Ranger;
 		} else if (!has_overcharge_researched) {
 			// early game priorities
-			if (numRangers >= 2 * numHealers + 4) {
+			if (numRangers+numMages+numKnights >= 2 * numHealers + 4) {
 				unitTypeToBuild = Healer;
 			}
 		} else if (has_overcharge_researched) {
