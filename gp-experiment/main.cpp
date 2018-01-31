@@ -109,8 +109,6 @@ static bool isPassable[55][55];
 static bool hasFriendlyUnit[55][55];
 static bool hasFriendlyStructure[55][55];
 static bool hasEnemyUnit[55][55];
-// whether a square had an enemy factory the last time you saw it
-static bool has_enemy_factory_in_memory[55][55];
 static int enemyUnitHealth[55][55];
 static int enemyUnitId[55][55];
 static int availableOverchargeId[55][55];
@@ -168,6 +166,7 @@ static int attackDistanceToEnemy[55][55];
 static int attackDistanceToEnemyRanger[55][55];
 static int attackDistanceToEnemyMage[55][55];
 static int attackDistanceToEnemyKnight[55][55];
+static int moveDistanceToEnemyKnight[55][55];
 // good positions are squares which are some distance from the enemy.
 // e.g. distance [51, 72] from the closest enemy (this might be changed later...)
 // Warning: random constants being used. Need to be changed if constants change!
@@ -202,11 +201,6 @@ static int distToCentreKarbonite[55][55];
 // When a worker is replicating towards the centre but currently does not have enough karbonite,
 // it sets this to reserve some of the karbonite so that other workers don't use it to replicate themselves
 static int karb_needed_to_save_for_centre_replication;
-
-// The last turn from which you've been continuously skipping building factory (because all the positions were too dangerous
-// or didn't have enough workers)
-// Set to -1 if you haven't needed to skip since the last factory you built.
-static int has_been_skipping_factory_since_turn;
 
 static int fast_log2_lookup[4096];
 
@@ -255,9 +249,6 @@ static int distToNearestEnemyFighter[55][55];
 static int distToNearestFriendlyFighter[55][55];
 
 static int distToWorkerTasks[55][55];
-
-static int distance_to_enemy_factories[55][55];
-static int distance_to_friendly_factories[55][55];
 
 static int numIdleRangers;
 static int numIdleMages;
@@ -612,7 +603,7 @@ int main() {
 		high_resolution_clock::time_point prev_point = high_resolution_clock::now();
 
 		while (true) {
-			//DEBUG_OUTPUT("\n======================\nStarting round %d\n", roundNum);
+			DEBUG_OUTPUT("\n======================\nStarting round %d\n", roundNum);
 			if (gc.get_time_left_ms() < 300) {
 				DEBUG_OUTPUT("Warning: Running out of time! Skipping turn! (Less than 300 ms left.)\n");
 			} else {
@@ -823,6 +814,7 @@ static void init_turn (vector<Unit>& myUnits) {
 			attackDistanceToEnemyRanger[y][x] = 9999;
 			attackDistanceToEnemyMage[y][x] = 9999;
 			attackDistanceToEnemyKnight[y][x] = 9999;
+			moveDistanceToEnemyKnight[y][x] = 9999;
 			is_good_ranger_position[y][x] = false;
 			is_good_ranger_position_taken[y][x] = false;
 			isSquareDangerous[y][x] = false;
@@ -843,17 +835,6 @@ static void init_turn (vector<Unit>& myUnits) {
 			MapLocation loc(myPlanet, x, y);
 			if (gc.can_sense_location(loc)) {
 				lastKnownKarboniteAmount[y][x] = (int) gc.get_karbonite_at(loc);
-
-				if (has_enemy_factory_in_memory[y][x]) {
-					if (gc.has_unit_at_location(loc)) {
-						Unit unit = gc.sense_unit_at_location(loc);
-						if (!(unit.get_team() != myTeam && unit.get_unit_type() == Factory)) {
-							has_enemy_factory_in_memory[y][x] = false;
-						}
-					} else {
-						has_enemy_factory_in_memory[y][x] = false;
-					}
-				}
 			}
 
 			two_smallest_dists_to_friendly_worker[y][x] = std::make_pair(MaxSmallestDistToFriendlyWorker + 1, MaxSmallestDistToFriendlyWorker + 1);
@@ -905,8 +886,6 @@ static void init_turn (vector<Unit>& myUnits) {
 	vector<SimpleState> enemyFighters;
 	vector<SimpleState> friendlyFighters;
 	vector<SimpleState> workerTasks;
-	vector<SimpleState> enemy_factories;
-	vector<SimpleState> friendly_factories;
 	vector<Unit> units = gc.get_units();
 
 	fo(i, 0, SZ(units)) {
@@ -969,10 +948,6 @@ static void init_turn (vector<Unit>& myUnits) {
 
 				if (unit.get_unit_type() == Knight) {
 					friendlyKnightCount[loc.get_y()][loc.get_x()]++;
-				}
-
-				if (unit.get_unit_type() == Factory) {
-					friendly_factories.push_back(SimpleState(loc.get_y(), loc.get_x()));
 				}
 
 				if (has_overcharge_researched && unit.get_unit_type() == Healer && unit.get_ability_heat() < 10) {
@@ -1054,6 +1029,7 @@ static void init_turn (vector<Unit>& myUnits) {
 								attackDistanceToEnemyMage[y][x] = min(attackDistanceToEnemyMage[y][x], myDist);
 							} else if (unit_type == Knight) {
 								attackDistanceToEnemyKnight[y][x] = min(attackDistanceToEnemyKnight[y][x], myDist);
+								moveDistanceToEnemyKnight[y][x] = min(moveDistanceToEnemyKnight[y][x], dis[locY][locX][y][x]);
 							}
 							if (myDist <= unit.get_attack_range()) {
 								numEnemiesThatCanAttackSquare[y][x]++;
@@ -1062,20 +1038,10 @@ static void init_turn (vector<Unit>& myUnits) {
 					}
 				}
 
-				if (unit.get_unit_type() == Factory) {
-					has_enemy_factory_in_memory[locY][locX] = true;
-				}
-
 				int enemy_component_num = connectedComponent[locY][locX];
 				last_sighting[enemy_component_num]=roundNum;
 
 			}
-		}
-	}
-
-	for (int y = 0; y < height; y++) for (int x = 0; x < width; x++) {
-		if (has_enemy_factory_in_memory[y][x]) {
-			enemy_factories.push_back(SimpleState(y, x));
 		}
 	}
 
@@ -1143,7 +1109,11 @@ static void init_turn (vector<Unit>& myUnits) {
 
 	good_mage_positions.clear();
 	fo(y, 0, height) fo(x, 0, width) {
-		if (RangerAttackRange < attackDistanceToEnemy[y][x] && attackDistanceToEnemy[y][x] <= MageReadyToBlinkRange) {
+		bool safeFromEnemy = (RangerAttackRange < attackDistanceToEnemyRanger[y][x]) &&
+			(MageAttackRange < attackDistanceToEnemyMage[y][x]) &&
+			(moveDistanceToEnemyKnight[y][x] >= 4);
+
+		if (safeFromEnemy && attackDistanceToEnemy[y][x] <= MageReadyToBlinkRange) {
 			is_good_mage_position[y][x] = true;
 			good_mage_positions.push_back(make_pair(y, x));
 		}
@@ -1182,9 +1152,6 @@ static void init_turn (vector<Unit>& myUnits) {
 	multisourceBfsAvoidingNothing(enemyFighters, distToNearestEnemyFighter);
 	multisourceBfsAvoidingNothing(friendlyFighters, distToNearestFriendlyFighter);
 
-	multisourceBfsAvoidingOnlyImpassableSquares(enemy_factories, distance_to_enemy_factories);
-	multisourceBfsAvoidingOnlyImpassableSquares(friendly_factories, distance_to_friendly_factories);
-
 	// Calculate good ranger positions
 	// Don't include:
 	// 1) impassable terrain
@@ -1192,7 +1159,11 @@ static void init_turn (vector<Unit>& myUnits) {
 	//    (This gets rid of those "unreachable", misleading "good positions" that are on the other side of their army)
 	good_ranger_positions.clear();
 	for (int y = 0; y < height; y++) for (int x = 0; x < width; x++) {
-		if (RangerAttackRange < attackDistanceToEnemy[y][x] && attackDistanceToEnemy[y][x] <= OneMoveFromRangerAttackRange &&
+		bool safeFromEnemy = (RangerAttackRange < attackDistanceToEnemyRanger[y][x]) &&
+			(MageAttackRange < attackDistanceToEnemyMage[y][x]) &&
+			(moveDistanceToEnemyKnight[y][x] >= 4);
+
+		if (safeFromEnemy && attackDistanceToEnemy[y][x] <= OneMoveFromRangerAttackRange &&
 				distToNearestEnemyFighter[y][x] >= distToNearestFriendlyFighter[y][x] &&
 				isPassable[y][x]) {
 			is_good_ranger_position[y][x] = true;
@@ -1394,8 +1365,6 @@ static void init_global_variables () {
 			fast_log2_lookup[j] = i;
 		}
 	}
-
-	has_been_skipping_factory_since_turn = -1;
 }
 
 int get_unit_order_priority (const Unit& unit) {
@@ -1653,7 +1622,7 @@ static void runEarthWorker (Unit& unit) {
 		}
 	}
 
-	//printf("worker at %d %d\n", unit.get_map_location().get_x(), unit.get_map_location().get_y());
+	printf("worker at %d %d\n", unit.get_map_location().get_x(), unit.get_map_location().get_y());
 
 	// movement
 	if (!doneMove && false /* need to place factory and no adjacent good places and nearby good place */) {
@@ -1665,7 +1634,7 @@ static void runEarthWorker (Unit& unit) {
 		int damaged_structure_dir = dirToAdjacentDamagedStructure(unit.get_map_location());
 
 		if (damaged_structure_dir != -1) {
-			//printf("staying next to damaged structure\n");
+			printf("staying next to damaged structure\n");
 			moveButStayNextToLoc(unit, unit.get_map_location().add(directions[damaged_structure_dir]));
 			doneMove = true;
 		}
@@ -1674,7 +1643,7 @@ static void runEarthWorker (Unit& unit) {
 		// move towards damaged structure
 
 		if (bfsTowardsDamagedStructure(unit)) {
-			//printf("moving to damaged structure\n");
+			printf("moving to damaged structure\n");
 			doneMove = true;
 		}
 	}
@@ -1756,7 +1725,7 @@ static void runEarthWorker (Unit& unit) {
 		// see doKarboniteMovement for more info on this if statement which checks whether it's worth it
 		// to replicate towards centre karbonite
 		if (distToCentreKarbonite[loc.get_y()][loc.get_x()] != MultisourceBfsUnreachableMax &&
-			centreKarboniteLeft > howMuchCentreKarbToBeWorthIt(distToCentreKarbonite[loc.get_y()][loc.get_x()])) {
+				centreKarboniteLeft > howMuchCentreKarbToBeWorthIt(distToCentreKarbonite[loc.get_y()][loc.get_x()])) {
 			replicateForCentreKarbonite = true;
 		}
 	}
@@ -1800,37 +1769,32 @@ static void runEarthWorker (Unit& unit) {
 			if (doBlueprint(unit, Factory)) {
 				doneAction = true;
 			}
-		} else {
-			// can't build factory so reset our #rounds skipping factory building counter
-			has_been_skipping_factory_since_turn = -1;
+		} else if (canRocket && lowRockets) {
 
-			if (canRocket && lowRockets) {
+			//workers shouldn't build rockets too far away
+			bool close_to_factory = false;
 
-				//workers shouldn't build rockets too far away
-				bool close_to_factory = false;
-
-				for (auto factory_loc : factory_locs) {
-					int my = loc.get_y(), mx = loc.get_x(), ty, tx;
-					tie(ty, tx) = factory_loc;
-					if (dis[my][mx][ty][tx] <= 8) {
-						last_round_worker_near_factory = roundNum;
-						close_to_factory = true;
-					}
+			for (auto factory_loc : factory_locs) {
+				int my = loc.get_y(), mx = loc.get_x(), ty, tx;
+				tie(ty, tx) = factory_loc;
+				if (dis[my][mx][ty][tx] <= 8) {
+					last_round_worker_near_factory = roundNum;
+					close_to_factory = true;
 				}
-
-				bool long_time_too_far = roundNum - last_round_worker_near_factory > 15;
-
-				if (long_time_too_far) {
-					call_for_fresh_workers = true;
-				}
-
-				if (close_to_factory) {
-					if (doBlueprint(unit, Rocket)) {
-						doneAction = true;
-					}
-				}
-
 			}
+
+			bool long_time_too_far = roundNum - last_round_worker_near_factory > 15;
+
+			if (long_time_too_far) {
+				call_for_fresh_workers = true;
+			}
+
+			if (close_to_factory) {
+				if (doBlueprint(unit, Rocket)) {
+					doneAction = true;
+				}
+			}
+
 		}
 
 		// TODO: try to move to a location with space if the adjacent spaces are too cramped to build a blueprint
@@ -1995,6 +1959,7 @@ static void runFactory (Unit& unit) {
 	bool done_choice = false;
 	if (roundNum <= 180) {
 
+
 		bool my_knight_rush = can_rush_enemy && roundNum <= 80;
 
 		// danger units = fighting units or factories
@@ -2004,6 +1969,12 @@ static void runFactory (Unit& unit) {
 			unitTypeToBuild = Knight;
 			done_choice = true;
 		}
+        
+        /*
+		unitTypeToBuild = Mage;
+		done_choice = true;
+        */
+
 	}
 	if (!done_choice) {
 		if (numWorkers == 0 || call_for_fresh_workers) {
@@ -2013,7 +1984,7 @@ static void runFactory (Unit& unit) {
 			unitTypeToBuild = Ranger;
 		} else if (!has_overcharge_researched) {
 			// early game priorities
-			if (numRangers >= 2 * numHealers + 4) {
+			if (numRangers+numMages+numKnights >= 2 * numHealers + 4) {
 				unitTypeToBuild = Healer;
 			}
 		} else if (has_overcharge_researched) {
@@ -2276,6 +2247,8 @@ static void runMage (Unit& unit) {
 		return;
 	}
 
+	printf("see mage id %d\n", unit.get_id());
+
 	// decide movement
 	if (unit.is_on_map() && gc.is_move_ready(unit.get_id())) {
 		bool doneMove = false;
@@ -2296,12 +2269,20 @@ static void runMage (Unit& unit) {
 		{
 			// if near enemies, do fighting movement
 
+			DEBUG_OUTPUT("Mage is close at %d %d attack distance is %d and mage attack range %d\n", myY, myX, attackDistanceToEnemy[myY][myX], MageAttackRange);
+
+
 			// somehow decide whether to move forward or backwards
 			if (attackDistanceToEnemy[myY][myX] <= MageAttackRange) {
 				// currently in range of enemy
 
 				// find which square would be best to kite to (even if your movement is currently on cd)
-				int best = -1, bestNumEnemies = 999, bestAttackDist = -1;
+				// initialise with your current situation (i.e. not moving)
+
+				int best = -1;
+				int bestNumEnemies = numEnemiesThatCanAttackSquare[myY][myX];
+				int bestAttackDist = attackDistanceToEnemy[myY][myX];
+
 				for (int i = 0; i < 8; i++) {
 					Direction dir = directions[i];
 					MapLocation loc = unit.get_map_location().add(dir);
@@ -2321,7 +2302,7 @@ static void runMage (Unit& unit) {
 				if (doneAttack) {
 					// just completed an attack, move backwards now to kite if you can
 
-					if (best != -1 && bestNumEnemies < numEnemiesThatCanAttackSquare[myY][myX]) {
+					if (best != -1) {
 						// System.out.println("kiting backwards!");
 						doMoveRobot(unit, directions[best]);
 
@@ -2337,13 +2318,22 @@ static void runMage (Unit& unit) {
 					doneMove = true;
 
 				} else {
-					// wait for your next attack before kiting back, so don't move yet
 					doneMove = true;
+
+					// move while remaining in attack range so you can attack again soon
 
 					// if the square you want to kite to is a good position, mark it as taken
 					// (same code as the if() clause, but just don't move)
-					if (best != -1 && bestNumEnemies < numEnemiesThatCanAttackSquare[myY][myX]) {
+					if (best != -1) {
+						// if moving away keeps you in attack range, there is no reason not to move away
+						// otherwise, just stay where you are
+
 						MapLocation after_loc = unit.get_map_location().add(directions[best]);
+
+						if (attackDistanceToEnemy[after_loc.get_y()][after_loc.get_x()] <= MageAttackRange) {
+							doMoveRobot(unit, directions[best]);
+						}
+
 						if (is_good_mage_position[after_loc.get_y()][after_loc.get_x()])
 						{
 							is_good_mage_position_taken[after_loc.get_y()][after_loc.get_x()] = true;
@@ -2452,6 +2442,9 @@ static void runMage (Unit& unit) {
 
 		if (!doneMove) {
 			// otherwise, search for a good destination to move towards
+
+
+			DEBUG_OUTPUT("Mage is finding another good destination\n");
 
 			// check if current location is good position
 			if (!doneMove && is_good_mage_position[myY][myX]) {
@@ -3073,7 +3066,9 @@ static bool mageTryToAttack(Unit& unit) {
 					}
 				}
 
-				if (whichToAttack == -1 || (kills>whichToAttackKills) || (kills==whichToAttackKills && attackPriority > whichToAttackPriority)) {
+				// this code prioritised killing a dead factory over a rushing knight
+				// if (whichToAttack == -1 || (kills>whichToAttackKills) || (kills==whichToAttackKills && attackPriority > whichToAttackPriority))
+				if (whichToAttack == -1 || (attackPriority>whichToAttackPriority) || (attackPriority==whichToAttackPriority && kills>whichToAttackKills)) {
 					whichToAttack = i;
 					whichToAttackKills = kills;
 					whichToAttackPriority = attackPriority;
@@ -3518,7 +3513,7 @@ static bool doReplicate(Unit& unit) {
 		// see doKarboniteMovement for more info on this if statement which checks whether it's worth it
 		// to replicate towards centre karbonite
 		if (distToCentreKarbonite[cur_loc.get_y()][cur_loc.get_x()] != MultisourceBfsUnreachableMax &&
-			centreKarboniteLeft > howMuchCentreKarbToBeWorthIt(distToCentreKarbonite[cur_loc.get_y()][cur_loc.get_x()])) {
+				centreKarboniteLeft > howMuchCentreKarbToBeWorthIt(distToCentreKarbonite[cur_loc.get_y()][cur_loc.get_x()])) {
 			// let's do it
 
 			// take our chunk from centreKarboniteLeft, because it's now less worth it for other workers to also
@@ -3544,7 +3539,8 @@ static bool doReplicate(Unit& unit) {
 
 			if (best != -1) {
 				replicateDir = directions[best];
-				//printf("worker at %d %d replicating in dir %d\n", unit.get_map_location().get_x(), unit.get_map_location().get_y(), best);
+				printf("worker at %d %d replicating in dir %d\n", unit.get_map_location().get_x(), unit.get_map_location().get_y(),
+						best);
 			}
 		}
 	}
@@ -3667,78 +3663,10 @@ static bool doBlueprint (Unit& unit, UnitType toBlueprint) {
 
 		Direction dir = directions[randDirOrder[best]];
 
-		MapLocation unit_loc = unit.get_map_location();
-		MapLocation loc = unit_loc.add(dir);
-		int dist_to_enemy = distance_to_enemy_factories[loc.get_y()][loc.get_x()];
-		int dist_to_friendly = distance_to_friendly_factories[loc.get_y()][loc.get_x()];
-		
-		if (toBlueprint == Factory) {
-			// it's a "safe position" if
-			// (either we have no factories, or they have no factories (that we have seen),
-			// or this factory is sufficiently closer to our factories than theirs)
-			// and we're not too close to an enemy factory
-			bool safe_position =
-				(dist_to_friendly == MultisourceBfsUnreachableMax ||
-				dist_to_enemy == MultisourceBfsUnreachableMax ||
-				dist_to_friendly < 3 + dist_to_enemy / 3) &&
-				dist_to_enemy >= 10;
-
-			// it's a kinda safe position if
-			// it's a safe position or
-			// ((either we have no factories, or they have no factories (that we've seen) or 
-			// we're closer-ish to our factories)
-			// and not *really* close to the enemy factories) or
-			// we're pretty far from enemy factories
-			bool kinda_safe_position =
-				safe_position ||
-				((dist_to_friendly == MultisourceBfsUnreachableMax ||
-				dist_to_enemy == MultisourceBfsUnreachableMax ||
-				dist_to_friendly < 3 + dist_to_enemy / 2) &&
-				dist_to_enemy >= 5) ||
-				dist_to_enemy >= 15;
-			
-			bool workable_position = 
-				// there's at least one other nearby worker
-				two_smallest_dists_to_friendly_worker[loc.get_y()][loc.get_x()].second <= MaxSmallestDistToFriendlyWorker;
-
-			bool is_good_factory_position = false;
-			if (safe_position && workable_position) {
-				is_good_factory_position = true;
-			} else if (has_been_skipping_factory_since_turn != -1 &&
-					has_been_skipping_factory_since_turn <= roundNum - 2 &&
-					kinda_safe_position &&
-					workable_position) {
-				// we've been skipping for at least 1 full turn
-				// and we're in a kinda safe and workable position
-				is_good_factory_position = true;
-			} else if (has_been_skipping_factory_since_turn != -1 &&
-					has_been_skipping_factory_since_turn <= roundNum - 3 &&
-					(kinda_safe_position || workable_position)) {
-				// we've been skipping for at least 2 full turns
-				// and we're in a kinda safe position OR a workable position
-				is_good_factory_position = true;
-			} else if (has_been_skipping_factory_since_turn != -1 &&
-					has_been_skipping_factory_since_turn <= roundNum - 4) {
-				// we've been skipping for at least 3 full turns
-				// just build a factory, whatever
-				is_good_factory_position = true;
-			}
-
-			if (is_good_factory_position) {
-				// we're building a factory now, so reset skipping counter
-				has_been_skipping_factory_since_turn = -1;
-			} else {
-				if (has_been_skipping_factory_since_turn == -1) {
-					has_been_skipping_factory_since_turn = roundNum;
-				}
-				return false;
-			}
-		}
-
-
 		// System.out.println("blueprinting in direction " + dir.toString() + " with space " + bestSpace);
 
 		gc.blueprint(unit.get_id(), toBlueprint, dir);
+		MapLocation loc = unit.get_map_location().add(dir);
 		hasFriendlyUnit[loc.get_y()][loc.get_x()] = true;
 		hasFriendlyStructure[loc.get_y()][loc.get_x()] = true;
 		Unit other = gc.sense_unit_at_location(loc);
@@ -4331,12 +4259,18 @@ static void doBlueprintMovement(Unit &unit, bool &doneMove) {
 			moveButStayNextToLoc(unit, unit.get_map_location().add(directions[blueprint_dir]));
 			doneMove = true;
 		}
+		if (doneMove) {
+			printf("did blueprint move\n");
+		}
 	}
 	if (!doneMove) {
 		// if very near a blueprint, move towards it
 
 		if (bfsTowardsBlueprint(unit)) {
 			doneMove = true;
+		}
+		if (doneMove) {
+			printf("did blueprint move\n");
 		}
 	}
 }
@@ -4353,7 +4287,7 @@ static void doKarboniteMovement(Unit &unit, bool &doneMove) {
 			// Warning: constant used (replicate cost)
 			// We'll say it's worth it if the centreKarboniteLeft is greater than the cost of replicating all those workers
 			if (distToCentreKarbonite[loc.get_y()][loc.get_x()] != MultisourceBfsUnreachableMax &&
-				centreKarboniteLeft > howMuchCentreKarbToBeWorthIt(distToCentreKarbonite[loc.get_y()][loc.get_x()])) {
+					centreKarboniteLeft > howMuchCentreKarbToBeWorthIt(distToCentreKarbonite[loc.get_y()][loc.get_x()])) {
 				// don't modify the centreKarboniteLeft yet
 				// we'll do that in doReplicate
 				tryMoveToLoc(unit, distToCentreKarbonite);
@@ -4370,6 +4304,7 @@ static void doKarboniteMovement(Unit &unit, bool &doneMove) {
 					Direction dir = directions[dir_index];
 					doMoveRobot(unit, dir);
 				}
+				printf("did short range bfs\n");
 			}
 		}
 
@@ -4379,6 +4314,10 @@ static void doKarboniteMovement(Unit &unit, bool &doneMove) {
 				tryMoveToLoc(unit, distToKarbonite);
 				doneMove = true;
 			}
+		}
+
+		if (doneMove) {
+			printf("did karbonite move\n");
 		}
 	}
 }
