@@ -48,6 +48,7 @@ static int roundNum;
 
 static bool raceToMars = false;
 static bool can_rush_enemy = false;
+static bool has_concave_established = false;
 static int last_round_idle = -1000;
 
 static int maxConcurrentRocketsReady = 1;
@@ -169,6 +170,11 @@ static int attackDistanceToEnemyRanger[55][55];
 static int attackDistanceToEnemyMage[55][55];
 static int attackDistanceToEnemyKnight[55][55];
 static int moveDistanceToEnemyKnight[55][55];
+
+static int attackDistanceToOurself[55][55];
+static int attackDistanceToFriendlyRanger[55][55];
+static int attackDistanceToFriendlyMage[55][55];
+static int moveDistanceToFriendlyKnight[55][55];
 // good positions are squares which are some distance from the enemy.
 // e.g. distance [51, 72] from the closest enemy (this might be changed later...)
 // Warning: random constants being used. Need to be changed if constants change!
@@ -825,6 +831,10 @@ static void init_turn (vector<Unit>& myUnits) {
 			attackDistanceToEnemyMage[y][x] = 9999;
 			attackDistanceToEnemyKnight[y][x] = 9999;
 			moveDistanceToEnemyKnight[y][x] = 9999;
+			attackDistanceToOurself[y][x] = 9999;
+			attackDistanceToFriendlyRanger[y][x] = 9999;
+			attackDistanceToFriendlyMage[y][x] = 9999;
+			moveDistanceToFriendlyKnight[y][x] = 9999;
 			is_good_ranger_position[y][x] = false;
 			is_good_ranger_position_taken[y][x] = false;
 			isSquareDangerous[y][x] = false;
@@ -979,6 +989,29 @@ static void init_turn (vector<Unit>& myUnits) {
 
 				if (has_overcharge_researched && unit.get_unit_type() == Healer && unit.get_ability_heat() < 10) {
 					availableOverchargeId[loc.get_y()][loc.get_x()] = unit.get_id();
+				}
+			}
+
+			if (is_fighter_unit_type(unit.get_unit_type())) {
+
+				UnitType unit_type = unit.get_unit_type();
+				int locY = unit.get_map_location().get_y();
+				int locX = unit.get_map_location().get_x();
+
+				for (int y = locY - 10; y <= locY + 10; y++) {
+					if (y < 0 || height <= y) continue;
+					for (int x = locX - 10; x <= locX + 10; x++) {
+						if (x < 0 || width <= x) continue;
+						int myDist = (y-locY) * (y-locY) + (x-locX) * (x-locX);
+						attackDistanceToOurself[y][x] = min(attackDistanceToOurself[y][x], myDist);
+						if (unit_type == Ranger) {
+							attackDistanceToFriendlyRanger[y][x] = min(attackDistanceToFriendlyRanger[y][x], myDist);
+						} else if (unit_type == Mage) {
+							attackDistanceToFriendlyMage[y][x] = min(attackDistanceToFriendlyMage[y][x], myDist);
+						} else if (unit_type == Knight) {
+							moveDistanceToFriendlyKnight[y][x] = min(moveDistanceToFriendlyKnight[y][x], dis[locY][locX][y][x]);
+						}
+					}
 				}
 			}
 
@@ -1212,6 +1245,40 @@ static void init_turn (vector<Unit>& myUnits) {
 		}
 	}
 	//DEBUG_OUTPUT("Number of good ranger positions: %d\n", int(good_ranger_positions.size()));
+
+	// Calculate size of our front
+	int ourFrontSize = 0;
+	for (int y = 0; y < height; y++) for (int x = 0; x < width; x++) {
+		bool safeFromEnemy = (RangerAttackRange < attackDistanceToEnemyRanger[y][x]) &&
+			(MageAttackRange < attackDistanceToEnemyMage[y][x]) &&
+			(moveDistanceToEnemyKnight[y][x] >= 4);
+
+		if (safeFromEnemy && attackDistanceToEnemy[y][x] <= OneMoveFromRangerAttackRange &&
+				distToNearestEnemyFighter[y][x] >= distToNearestFriendlyFighter[y][x]) {
+			ourFrontSize++;
+		}
+	}
+
+	// Calculate size of their front
+	int theirFrontSize = 0;
+	for (int y = 0; y < height; y++) for (int x = 0; x < width; x++) {
+		bool safeFromUs = (RangerAttackRange < attackDistanceToFriendlyRanger[y][x]) &&
+			(MageAttackRange < attackDistanceToFriendlyMage[y][x]) &&
+			(moveDistanceToFriendlyKnight[y][x] >= 4);
+
+		if (safeFromUs && attackDistanceToOurself[y][x] <= OneMoveFromRangerAttackRange &&
+				distToNearestFriendlyFighter[y][x] >= distToNearestEnemyFighter[y][x]) {
+			theirFrontSize++;
+		}
+	}
+
+	// Compare fronts to estimate whether or not we have a concave
+	has_concave_established = (ourFrontSize >= 1.2*theirFrontSize);
+	if (has_concave_established) {
+		DEBUG_OUTPUT("Probably winning?\n");
+	} else {
+		DEBUG_OUTPUT("\t\t\t\t\t\tProbably getting rekt?\n");
+	}
 
 	// attackLoc update
 	checkForEnemyUnits(units);
@@ -2030,8 +2097,14 @@ static void runFactory (Unit& unit) {
 			unitTypeToBuild = Ranger;
 		} else if (!has_overcharge_researched) {
 			// early game priorities
-			if (numRangers+numMages+numKnights >= 2 * numHealers + 4) {
-				unitTypeToBuild = Healer;
+			if (has_concave_established) {
+				if (numRangers+numMages+numKnights >= 2 * numHealers + 4) {
+					unitTypeToBuild = Healer;
+				}
+			} else {
+				if (numRangers+numMages+numKnights >= 3 * numHealers / 2 + 3) {
+					unitTypeToBuild = Healer;
+				}
 			}
 		} else if (has_overcharge_researched) {
 			// reduce rangers so that we can get healers and mages out there
@@ -2114,7 +2187,10 @@ static void runRanger (Unit& unit) {
 					}
 				}
 
-				if (doneAttack || attackDistanceToEnemy[myY][myX] <= 36) {
+				if ((has_concave_established && (doneAttack || attackDistanceToEnemy[myY][myX] <= 36)) ||
+					(!has_concave_established && ((doneAttack && unit.get_health() <= 90) ||
+						unit.get_health() <= 60 ||
+						attackDistanceToEnemy[myY][myX] <= 36))) {
 					// just completed an attack or we're too close to the enemy
 					// move backwards now to kite if you can
 
@@ -2153,7 +2229,8 @@ static void runRanger (Unit& unit) {
 				}
 			} else {
 				// currently 1 move from being in range of enemy
-				if (!doneAttack && gc.is_attack_ready(unit.get_id()) && is_attack_round) {
+				if (!doneAttack && gc.is_attack_ready(unit.get_id()) &&
+					((has_concave_established && is_attack_round) || (!has_concave_established && unit.get_health() > 180))) {
 					// move into a position where you can attack
 					int best = -1, bestNumEnemies = 999;
 					shuffleDirOrder();
@@ -2172,7 +2249,7 @@ static void runRanger (Unit& unit) {
 						}
 					}
 
-					if (best != -1) {
+					if (best != -1 && (has_concave_established || bestNumEnemies <= 3)) {
 						Direction dir = directions[randDirOrder[best]];
 
 						// mark your current position as yours so other rangers don't try to move there while you're gone
@@ -2205,7 +2282,7 @@ static void runRanger (Unit& unit) {
 				// if there's an closer (or equally close) adjacent good position
 				// and the next attack wave isn't too soon, then move to it
 				bool foundMove = false;
-				if (roundNum % 5 < 3) {
+				if ((has_concave_established && roundNum % 5 < 3) || !has_concave_established) {
 					shuffleDirOrder();
 					for (int i = 0; i < 8; i++) {
 						Direction dir = directions[randDirOrder[i]];
@@ -2927,6 +3004,12 @@ static int getKnightAttackPriority(Unit& unit){
 // Requriements: Make sure the Unit object is up to date!
 // I.e. you must call gc.get_unit() again if the ranger moves!
 static bool rangerTryToAttack(Unit& unit) {
+	if (!has_concave_established && roundNum > 150 && roundNum % 20 == 1) {
+		// once we're into the midgame, every ~20 rounds sync up all the ranger attacks
+		// but only if we dont have a concave
+		return false;
+	}
+
 	if (unit.is_on_map() && gc.is_attack_ready(unit.get_id())) {
 		// this radius needs to be at least 1 square larger than the ranger's attack range
 		// because the ranger might move, but the ranger's unit.get_map_location() won't update unless we
