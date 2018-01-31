@@ -2293,7 +2293,7 @@ static void runMage (Unit& unit) {
 		return;
 	}
 
-	printf("see mage id %d\n", unit.get_id());
+	DEBUG_OUTPUT("see mage id %d\n", unit.get_id());
 
 	// decide movement
 	if (unit.is_on_map() && gc.is_move_ready(unit.get_id())) {
