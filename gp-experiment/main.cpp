@@ -1800,32 +1800,37 @@ static void runEarthWorker (Unit& unit) {
 			if (doBlueprint(unit, Factory)) {
 				doneAction = true;
 			}
-		} else if (canRocket && lowRockets) {
+		} else {
+			// can't build factory so reset our #rounds skipping factory building counter
+			has_been_skipping_factory_since_turn = -1;
 
-			//workers shouldn't build rockets too far away
-			bool close_to_factory = false;
+			if (canRocket && lowRockets) {
 
-			for (auto factory_loc : factory_locs) {
-				int my = loc.get_y(), mx = loc.get_x(), ty, tx;
-				tie(ty, tx) = factory_loc;
-				if (dis[my][mx][ty][tx] <= 8) {
-					last_round_worker_near_factory = roundNum;
-					close_to_factory = true;
+				//workers shouldn't build rockets too far away
+				bool close_to_factory = false;
+
+				for (auto factory_loc : factory_locs) {
+					int my = loc.get_y(), mx = loc.get_x(), ty, tx;
+					tie(ty, tx) = factory_loc;
+					if (dis[my][mx][ty][tx] <= 8) {
+						last_round_worker_near_factory = roundNum;
+						close_to_factory = true;
+					}
 				}
-			}
 
-			bool long_time_too_far = roundNum - last_round_worker_near_factory > 15;
+				bool long_time_too_far = roundNum - last_round_worker_near_factory > 15;
 
-			if (long_time_too_far) {
-				call_for_fresh_workers = true;
-			}
-
-			if (close_to_factory) {
-				if (doBlueprint(unit, Rocket)) {
-					doneAction = true;
+				if (long_time_too_far) {
+					call_for_fresh_workers = true;
 				}
-			}
 
+				if (close_to_factory) {
+					if (doBlueprint(unit, Rocket)) {
+						doneAction = true;
+					}
+				}
+
+			}
 		}
 
 		// TODO: try to move to a location with space if the adjacent spaces are too cramped to build a blueprint
@@ -3669,20 +3674,27 @@ static bool doBlueprint (Unit& unit, UnitType toBlueprint) {
 		
 		if (toBlueprint == Factory) {
 			// it's a "safe position" if
-			// either we have no factories, or they have no factories (that we have seen),
-			// or this factory is sufficiently closer to our factories than theirs and we're not *really* close to an enemy factory
+			// (either we have no factories, or they have no factories (that we have seen),
+			// or this factory is sufficiently closer to our factories than theirs)
+			// and we're not too close to an enemy factory
 			bool safe_position =
-				dist_to_friendly == MultisourceBfsUnreachableMax ||
+				(dist_to_friendly == MultisourceBfsUnreachableMax ||
 				dist_to_enemy == MultisourceBfsUnreachableMax ||
-				(dist_to_friendly < 3 + dist_to_enemy / 3 && dist_to_enemy >= 5);
+				dist_to_friendly < 3 + dist_to_enemy / 3) &&
+				dist_to_enemy >= 10;
 
 			// it's a kinda safe position if
-			// it's a safe position
-			// or we're closer-ish to our factories
-			// or we're pretty far from enemy factories
+			// it's a safe position or
+			// ((either we have no factories, or they have no factories (that we've seen) or 
+			// we're closer-ish to our factories)
+			// and not *really* close to the enemy factories) or
+			// we're pretty far from enemy factories
 			bool kinda_safe_position =
 				safe_position ||
-				dist_to_friendly < 3 + dist_to_enemy / 2 ||
+				((dist_to_friendly == MultisourceBfsUnreachableMax ||
+				dist_to_enemy == MultisourceBfsUnreachableMax ||
+				dist_to_friendly < 3 + dist_to_enemy / 2) &&
+				dist_to_enemy >= 5) ||
 				dist_to_enemy >= 15;
 			
 			bool workable_position = 
