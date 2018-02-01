@@ -50,6 +50,7 @@ static bool raceToMars = false;
 static bool can_rush_enemy = false;
 static bool has_concave_established = false;
 static int last_round_idle = -1000;
+static bool seen_any_ranger = false;
 
 static int maxConcurrentRocketsReady = 1;
 
@@ -1100,6 +1101,10 @@ static void init_turn (vector<Unit>& myUnits) {
 					}
 				}
 
+				if (unit.get_unit_type() == Ranger) {
+					seen_any_ranger = true;
+				}
+
 				if (unit.get_unit_type() == Factory) {
 					has_enemy_factory_in_memory[locY][locX] = true;
 				}
@@ -2086,7 +2091,6 @@ static void runFactory (Unit& unit) {
 	bool done_choice = false;
 	if (roundNum <= 180) {
 
-
 		bool my_knight_rush = can_rush_enemy && roundNum <= 80;
 
 		// danger units = fighting units or factories
@@ -2094,13 +2098,26 @@ static void runFactory (Unit& unit) {
 		std::tie(enemyFactories, friendlyK, enemyK) = factoryGetNearbyStuff(unit);
 		if (my_knight_rush || friendlyK < enemyK || (enemyFactories > 0 && friendlyK <= enemyK)) {
 			unitTypeToBuild = Knight;
+
+			if (!seen_any_ranger && enemyFactories == 0 && enemyK == 0) {
+				unitTypeToBuild = Mage;
+			}
+
+			if (numRangers+numMages+numKnights >= 2 * numHealers + 4) {
+				unitTypeToBuild = Healer;
+			}
+
+			if (unitTypeToBuild == Mage && numMages >= 2) {
+				unitTypeToBuild = Ranger;
+			}
+
 			done_choice = true;
 		}
-        
-        /*
-		unitTypeToBuild = Mage;
-		done_choice = true;
-        */
+
+		/*
+		   unitTypeToBuild = Mage;
+		   done_choice = true;
+		 */
 
 	}
 	if (!done_choice) {
@@ -2202,9 +2219,9 @@ static void runRanger (Unit& unit) {
 				}
 
 				if ((has_concave_established && (doneAttack || attackDistanceToEnemy[myY][myX] <= 36)) ||
-					(!has_concave_established && ((doneAttack && unit.get_health() <= 90) ||
-						unit.get_health() <= 60 ||
-						attackDistanceToEnemy[myY][myX] <= 36))) {
+						(!has_concave_established && ((doneAttack && unit.get_health() <= 90) ||
+													  unit.get_health() <= 60 ||
+													  attackDistanceToEnemy[myY][myX] <= 36))) {
 					// just completed an attack or we're too close to the enemy
 					// move backwards now to kite if you can
 
@@ -2244,7 +2261,7 @@ static void runRanger (Unit& unit) {
 			} else {
 				// currently 1 move from being in range of enemy
 				if (!doneAttack && gc.is_attack_ready(unit.get_id()) &&
-					((has_concave_established && is_attack_round) || (!has_concave_established && unit.get_health() > 180))) {
+						((has_concave_established && is_attack_round) || (!has_concave_established && unit.get_health() > 180))) {
 					// move into a position where you can attack
 					int best = -1, bestNumEnemies = 999;
 					shuffleDirOrder();
@@ -3809,7 +3826,7 @@ static bool doBlueprint (Unit& unit, UnitType toBlueprint) {
 		MapLocation loc = unit_loc.add(dir);
 		int dist_to_enemy = distance_to_enemy_factories[loc.get_y()][loc.get_x()];
 		int dist_to_friendly = distance_to_friendly_factories[loc.get_y()][loc.get_x()];
-		
+
 		if (toBlueprint == Factory) {
 			// it's a "safe position" if
 			// (either we have no factories, or they have no factories (that we have seen),
@@ -3817,8 +3834,8 @@ static bool doBlueprint (Unit& unit, UnitType toBlueprint) {
 			// and we're not too close to an enemy factory
 			bool safe_position =
 				(dist_to_friendly == MultisourceBfsUnreachableMax ||
-				dist_to_enemy == MultisourceBfsUnreachableMax ||
-				dist_to_friendly < 3 + dist_to_enemy / 3) &&
+				 dist_to_enemy == MultisourceBfsUnreachableMax ||
+				 dist_to_friendly < 3 + dist_to_enemy / 3) &&
 				dist_to_enemy >= 10;
 
 			// it's a kinda safe position if
@@ -3830,11 +3847,11 @@ static bool doBlueprint (Unit& unit, UnitType toBlueprint) {
 			bool kinda_safe_position =
 				safe_position ||
 				((dist_to_friendly == MultisourceBfsUnreachableMax ||
-				dist_to_enemy == MultisourceBfsUnreachableMax ||
-				dist_to_friendly < 3 + dist_to_enemy / 2) &&
-				dist_to_enemy >= 5) ||
+				  dist_to_enemy == MultisourceBfsUnreachableMax ||
+				  dist_to_friendly < 3 + dist_to_enemy / 2) &&
+				 dist_to_enemy >= 5) ||
 				dist_to_enemy >= 15;
-			
+
 			bool workable_position = 
 				// there's at least one other nearby worker
 				two_smallest_dists_to_friendly_worker[loc.get_y()][loc.get_x()].second <= MaxSmallestDistToFriendlyWorker;
@@ -4029,7 +4046,7 @@ static std::tuple<int,int,int> factoryGetNearbyStuff(Unit& unit) {
 		return make_tuple(0, 0, 0);
 	}
 
-	static const int search_dist = 5;
+	static const int search_dist = 7;
 
 	MapLocation loc = unit.get_map_location();
 	int locY = loc.get_y(), locX = loc.get_x();
