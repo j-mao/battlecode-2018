@@ -2021,15 +2021,44 @@ static void runMarsWorker (Unit& unit) {
 }
 
 static void tryToUnload (Unit& unit) {
+	std::vector<unsigned> garrison = unit.get_structure_garrison();
+	if (garrison.empty()) {
+		return;
+	}
+
+	UnitType other_type = gc.get_unit(garrison[0]).get_unit_type();
+
+	int best_dir = -1, best_dist;
+	if (other_type == Knight) {
+		best_dist = 999999;
+	} else {
+		best_dist = -1;
+	}
 	for (int j = 0; j < 8; j++) {
 		Direction unloadDir = directions[j];
 		if (gc.can_unload(unit.get_id(), unloadDir)) {
-			gc.unload(unit.get_id(), unloadDir);
 			MapLocation loc = unit.get_map_location().add(unloadDir);
-			hasFriendlyUnit[loc.get_y()][loc.get_x()] = true;
-			add_unit_to_all_my_units(gc.sense_unit_at_location(loc));
-			// TODO: check everywhere else to make sure hasFriendlyUnits[][] is being correctly maintained.
+			int dist = std::min(attackDistanceToEnemy[loc.get_y()][loc.get_x()], 100);
+			bool is_better_dist;
+			if (other_type == Knight) {
+				is_better_dist = dist < best_dist;
+			} else {
+				is_better_dist = dist > best_dist;
+			}
+			if (best_dir == -1 || is_better_dist) {
+				best_dir = j;
+				best_dist = dist;
+			}
 		}
+	}
+	
+	if (best_dir != -1) {
+		Direction unloadDir = directions[best_dir];
+		gc.unload(unit.get_id(), unloadDir);
+		MapLocation loc = unit.get_map_location().add(unloadDir);
+		hasFriendlyUnit[loc.get_y()][loc.get_x()] = true;
+		add_unit_to_all_my_units(gc.sense_unit_at_location(loc));
+		// TODO: check everywhere else to make sure hasFriendlyUnits[][] is being correctly maintained.
 	}
 }
 
