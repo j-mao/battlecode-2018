@@ -2816,7 +2816,7 @@ static void knightTryToAttack (Unit& unit) {
 
 static void runHealer (Unit& unit) {
 	tryToHeal(unit);
-	bool doneMove = false;
+	bool doneMove = !gc.is_move_ready(unit.get_id());
 
 	if (!doneMove && try_summon_move(unit)) {
 		doneMove = true;
@@ -2827,7 +2827,33 @@ static void runHealer (Unit& unit) {
 
 	if (!doneMove && is_good_healer_position[myY][myX]) {
 		doneMove = true;
-		is_good_healer_position_taken[myY][myX] = true;
+
+		// if there's an adjacent good positino that is closer/equally close to enemty
+		// then move to it
+		bool foundMove = false;
+		shuffleDirOrder();
+		for (int i = 0; i < 8; i++) {
+			Direction dir = directions[randDirOrder[i]];
+			MapLocation loc = unit.get_map_location().add(dir);
+			if (0 <= loc.get_y() && loc.get_y() < height &&
+					0 <= loc.get_x() && loc.get_x() < width &&
+					is_good_healer_position[loc.get_y()][loc.get_x()] &&
+					manhattanDistanceToNearestEnemy[loc.get_y()][loc.get_x()] <= manhattanDistanceToNearestEnemy[myY][myX] &&
+					gc.can_move(unit.get_id(), dir)) {
+				//System.out.println("moving to other good location!!");
+				foundMove = true;
+				doMoveRobot(unit, dir);
+				is_good_healer_position_taken[loc.get_y()][loc.get_x()] = true;
+				break;
+			}
+		}
+
+		if (!foundMove) {
+			// otherwise, stay on your current position
+			if (!is_good_healer_position_taken[myY][myX]) {
+				is_good_healer_position_taken[myY][myX] = true;
+			}
+		}
 	}
 
 	if (!doneMove) {
