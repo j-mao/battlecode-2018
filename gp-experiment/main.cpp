@@ -286,6 +286,7 @@ static bool is_very_early_game;
 // TODO: generalise this to all research types. Like... current_x_research_level or something idk.
 static bool has_overcharge_researched;
 static bool has_blink_researched;
+static int current_mage_damage;
 
 // we are ready to build mages once we have overcharge, or once we are "close" to getting overcharge
 static const unsigned CLOSE_TO_RESEARCH_DONE = 40; // 40 turns
@@ -385,6 +386,7 @@ static int dirToAdjacentBuildingBlueprint(MapLocation loc);
 static void moveButStayNextToLoc(Unit &unit, const MapLocation &loc);
 static bool moveToAttackLocs (Unit& unit);
 static void get_available_overcharges_in_range(Unit& unit, std::vector<std::pair<int, int>> &result_vector);
+static void get_available_overcharges_in_range (MapLocation loc, std::vector<std::pair<int, int>> &result_vector);
 
 static MapLocation getRandomMapLocation(Planet p, const MapLocation &giveUp);
 static void moveToTendency(Unit& unit);
@@ -791,6 +793,7 @@ int main() {
 }
 
 static void init_turn (vector<Unit>& myUnits) {
+
 	unit_summon.clear();
 
 	factoriesBeingBuilt.clear();
@@ -906,6 +909,18 @@ static void init_turn (vector<Unit>& myUnits) {
 	if (!has_blink_researched) {
 		has_blink_researched = research_info.get_level(Mage) >= 4;
 	}
+
+	current_mage_damage = 60;
+	if (research_info.get_level(Mage) >= 1) {
+		current_mage_damage += 15;
+	}
+	if (research_info.get_level(Mage) >= 2) {
+		current_mage_damage += 15;
+	}
+	if (research_info.get_level(Mage) >= 3) {
+		current_mage_damage += 15;
+	}
+
 	//reset unit counts
 	numWorkers = 0; numKnights = 0; numRangers = 0; numMages = 0; numHealers = 0; numFactories = 0; numRockets = 0;
 	numFactoryBlueprints = 0; numRocketBlueprints = 0;
@@ -1165,7 +1180,7 @@ static void init_turn (vector<Unit>& myUnits) {
 				for (int x = tx - 6; x <= tx + 6; x++) {
 					if (x < 0 || width <= x) continue;
 					int myDist = (y-ty) * (y-ty) + (x-tx) * (x-tx);
-					if (10 <= myDist && myDist <= 20) {
+					if (4 <= myDist && myDist <= 20) {
 						is_good_healer_position[y][x] = true;
 					}
 				}
@@ -2020,6 +2035,7 @@ static void runMarsWorker (Unit& unit) {
 	}
 }
 
+
 static void tryToUnload (Unit& unit) {
 	std::vector<unsigned> garrison = unit.get_structure_garrison();
 	if (garrison.empty()) {
@@ -2051,7 +2067,7 @@ static void tryToUnload (Unit& unit) {
 			}
 		}
 	}
-	
+
 	if (best_dir != -1) {
 		Direction unloadDir = directions[best_dir];
 		gc.unload(unit.get_id(), unloadDir);
@@ -2061,6 +2077,7 @@ static void tryToUnload (Unit& unit) {
 		// TODO: check everywhere else to make sure hasFriendlyUnits[][] is being correctly maintained.
 	}
 }
+
 
 static void runEarthRocket (Unit& unit) {
 
@@ -2168,10 +2185,10 @@ static void runFactory (Unit& unit) {
 			}
 		} else if (has_overcharge_researched) {
 			// reduce rangers so that we can get healers and mages out there
-			if (numRangers*2 < good_ranger_positions.size()*3) {
-				unitTypeToBuild = Ranger;
-			} else if (numMages < 3) {
+			if (numMages < 4) {
 				unitTypeToBuild = Mage;
+			} else if (numRangers < good_ranger_positions.size() * 4 / 3) {
+				unitTypeToBuild = Ranger;
 			} else {
 				unitTypeToBuild = Healer;
 			}
@@ -2558,6 +2575,7 @@ static void runMage (Unit& unit) {
 				}
 				if (attackDistanceToEnemy[myY][myX] > MageAttackRange) {
 					// use overcharge to get closer
+					std::set<std::pair<int, int>> used_overcharges;
 					std::vector<std::pair<int, int>> available_overcharge_list;
 					get_available_overcharges_in_range(unit, available_overcharge_list);
 					MapLocation resultantLocation(unit.get_map_location());
@@ -2592,21 +2610,51 @@ static void runMage (Unit& unit) {
 						}
 						moveDirs.push_back(directions[randDirOrder[best]]);
 						whoIsOvercharging.push_back(i);
+						used_overcharges.insert(available_overcharge_list[i]);
 						resultantLocation = resultantLocation.add(directions[randDirOrder[best]]);
 					}
+
+					std::vector<std::pair<int, int>> attack_overcharges, new_overcharges;
+					get_available_overcharges_in_range(resultantLocation, attack_overcharges);
+
+					int overcharges_left = 0;
+					for (auto i : attack_overcharges) {
+						if (!used_overcharges.count(i)) {
+							overcharges_left++;
+							new_overcharges.push_back(i);
+						}
+					}
+					// ranger health is 200
+					int num_hits_needed = (200+current_mage_damage-1) / current_mage_damage;
+					bool can_insta_kill = (num_hits_needed-1) <= overcharges_left;
+
 					if (attackDistanceToEnemy[resultantLocation.get_y()][resultantLocation.get_x()] <= MageAttackRange) {
-						// a path was found; lets do this
-						for (size_t i = 0; i < moveDirs.size(); i++) {
-							// the final argument forces the move to occur, whether or not caches were corrupted
-							// multiple moves screw up caches badly so we must force
-							doMoveRobot(unit, moveDirs[i], true);
-							// update location
-							unit = gc.get_unit(unit.get_id());
-							myY = unit.get_map_location().get_y();
-							myX = unit.get_map_location().get_x();
-							mageTryToAttack(unit); // attack for free
-							if (doOvercharge(available_overcharge_list[whoIsOvercharging[i]], unit)) {
+						
+						printf("found a path, currently need %d hits, overcharge left %d\n", num_hits_needed, overcharges_left);
+
+						if (can_insta_kill) {
+							printf("round %d, go for it\n", roundNum);
+
+							// a path was found; lets do this
+							for (size_t i = 0; i < moveDirs.size(); i++) {
+								// the final argument forces the move to occur, whether or not caches were corrupted
+								// multiple moves screw up caches badly so we must force
+								doMoveRobot(unit, moveDirs[i], true);
+								// update location
+								unit = gc.get_unit(unit.get_id());
+								myY = unit.get_map_location().get_y();
+								myX = unit.get_map_location().get_x();
+								mageTryToAttack(unit); // attack for free
+								if (doOvercharge(available_overcharge_list[whoIsOvercharging[i]], unit)) {
+								}
 							}
+
+							fo(rep, 0, num_hits_needed-1) {
+								mageTryToAttack(unit);
+								if (doOvercharge(new_overcharges[rep], unit)) {
+								}
+							}
+							mageTryToAttack(unit);
 						}
 					}
 				}
@@ -2993,8 +3041,22 @@ static bool moveToAttackLocs (Unit& unit) {
 	return tryMoveToLoc(unit, dis[bestLoc.get_y()][bestLoc.get_x()]);
 }
 
-static void get_available_overcharges_in_range(Unit& unit, std::vector<std::pair<int, int>> &result_vector) {
+static void get_available_overcharges_in_range (Unit& unit, std::vector<std::pair<int, int>> &result_vector) {
 	MapLocation loc = unit.get_map_location();
+	int loc_y = loc.get_y();
+	int loc_x = loc.get_x();
+
+	// Warning: constant being used (healer overcharge range)
+	for (int y = std::max(0, loc_y - 5); y <= std::min(height - 1, loc_y + 5); y++) {
+		for (int x = std::max(0, loc_x - 5); x <= std::min(width - 1, loc_x + 5); x++) {
+			if (distance_squared(loc_y - y, loc_x - x) <= 30 && availableOverchargeId[y][x] != -1) {
+				result_vector.emplace_back(y, x);
+			}
+		}
+	}
+}
+
+static void get_available_overcharges_in_range (MapLocation loc, std::vector<std::pair<int, int>> &result_vector) {
 	int loc_y = loc.get_y();
 	int loc_x = loc.get_x();
 
@@ -3342,6 +3404,7 @@ void mageTryToBomb(Unit &unit) {
 	}
 	vector<pair<int, int> > available_overcharge_list;
 	get_available_overcharges_in_range(unit, available_overcharge_list);
+	printf("bombing with %d\n", SZ(available_overcharge_list));
 	if (available_overcharge_list.size() == 0) {
 		return;
 	}
@@ -3793,9 +3856,7 @@ static bool doReplicate(Unit& unit) {
 		return true;
 	}
 	return false;
-}
-
-static bool doBlueprint (Unit& unit, UnitType toBlueprint) {
+}static bool doBlueprint (Unit& unit, UnitType toBlueprint) {
 	shuffleDirOrder();
 	int best = -1, bestAttackDistance = -1, bestSpace = -1, best_dist_to_fellow_comrades = 9999;
 
