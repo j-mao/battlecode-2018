@@ -3856,11 +3856,9 @@ static bool doReplicate(Unit& unit) {
 		return true;
 	}
 	return false;
-}
-
-static bool doBlueprint (Unit& unit, UnitType toBlueprint) {
+}static bool doBlueprint (Unit& unit, UnitType toBlueprint) {
 	shuffleDirOrder();
-	int best = -1, bestAttackDistance = -1, bestSpace = -1;
+	int best = -1, bestAttackDistance = -1, bestSpace = -1, best_dist_to_fellow_comrades = 9999;
 
 	if (toBlueprint == Factory) {
 		int wouldBeBest = best;
@@ -3875,12 +3873,15 @@ static bool doBlueprint (Unit& unit, UnitType toBlueprint) {
 				int attackDistance = min(99, attackDistanceToEnemy[loc.get_y()][loc.get_x()]);
 				// we want at least 5 squares around the factory
 				int space = min(getSpaceAround(loc), 5);
+				int dist_to_fellow_comrades = two_smallest_dists_to_friendly_worker[loc.get_y()][loc.get_x()].second;
 				if ((space > bestSpace ||
-							(space == bestSpace && attackDistance > bestAttackDistance)) &&
+							(space == bestSpace && attackDistance > bestAttackDistance) ||
+							(space == bestSpace && attackDistance == bestAttackDistance && dist_to_fellow_comrades < best_dist_to_fellow_comrades)) &&
 						gc.can_blueprint(unit.get_id(), toBlueprint, directions[randDirOrder[i]]) &&
 						!will_blueprint_create_blockage(loc)) {
 					bestAttackDistance = attackDistance;
 					bestSpace = space;
+					best_dist_to_fellow_comrades = dist_to_fellow_comrades;
 					best = i;
 				}
 			}

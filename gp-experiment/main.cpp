@@ -267,6 +267,9 @@ static int distToWorkerTasks[55][55];
 static int distance_to_enemy_factories[55][55];
 static int distance_to_friendly_factories[55][55];
 
+static int dist_to_second_friendly_ranger[55][55];
+static int dist_to_second_friendly_healer[55][55];
+
 static int numIdleRangers;
 static int numIdleMages;
 
@@ -400,6 +403,7 @@ static void mageTryToBomb(Unit& unit);
 static void tryToHeal(Unit& unit);
 static void multisourceBfsAvoidingUnitsAndDanger (vector<SimpleState>& startingLocs, int resultArr[55][55]);
 static void multisourceBfsAvoidingOnlyImpassableSquares (vector<SimpleState>& startingLocs, int resultArr[55][55]);
+static void multisourceBfsForSecondClosestAvoidingOnlyImpassableSquares (vector<SimpleState>& startingLocs, int resultArr[55][55]);
 static void multisourceBfsAvoidingNothing (vector<SimpleState>& startingLocs, int resultArr[55][55]);
 static bool doReplicate(Unit& unit);
 static void checkForEnemyUnits (vector<Unit>& allUnits);
@@ -937,6 +941,8 @@ static void init_turn (vector<Unit>& myUnits) {
 	vector<SimpleState> workerTasks;
 	vector<SimpleState> enemy_factories;
 	vector<SimpleState> friendly_factories;
+	vector<SimpleState> friendly_rangers;
+	vector<SimpleState> friendly_healers;
 	vector<Unit> units = gc.get_units();
 
 	fo(i, 0, SZ(units)) {
@@ -1003,6 +1009,14 @@ static void init_turn (vector<Unit>& myUnits) {
 
 				if (unit.get_unit_type() == Factory) {
 					friendly_factories.push_back(SimpleState(loc.get_y(), loc.get_x()));
+				}
+
+				if (unit.get_unit_type() == Ranger) {
+					friendly_rangers.push_back(SimpleState(loc.get_y(), loc.get_x()));
+				}
+
+				if (unit.get_unit_type() == Healer) {
+					friendly_healers.push_back(SimpleState(loc.get_y(), loc.get_x()));
 				}
 
 				if (has_overcharge_researched && unit.get_unit_type() == Healer && unit.get_ability_heat() < 10) {
@@ -1180,8 +1194,15 @@ static void init_turn (vector<Unit>& myUnits) {
 				for (int x = tx - 6; x <= tx + 6; x++) {
 					if (x < 0 || width <= x) continue;
 					int myDist = (y-ty) * (y-ty) + (x-tx) * (x-tx);
-					if (4 <= myDist && myDist <= 20) {
+					if (myDist <= 30) {
 						is_good_healer_position[y][x] = true;
+					}
+					
+					// hard code that the healer should stay back a bit if the round is nearing
+					// 225 when overcharge will be researched by the enemy, so that the healer
+					// doesn't get el rekt by mage splash damage.
+					if (roundNum >= 217 && myDist <= 2) {
+						is_good_healer_position[y][x] = false;
 					}
 				}
 			}
@@ -1190,7 +1211,7 @@ static void init_turn (vector<Unit>& myUnits) {
 
 	good_healer_positions.clear();
 	fo(y, 0, height) fo(x, 0, width) {
-		if (attackDistanceToEnemy[y][x] <= 75) {
+		if (attackDistanceToEnemy[y][x] <= OneMoveFromRangerAttackRange) {
 			is_good_healer_position[y][x] = false;
 		}
 		if (is_good_healer_position[y][x]) {
@@ -1248,6 +1269,9 @@ static void init_turn (vector<Unit>& myUnits) {
 
 	multisourceBfsAvoidingOnlyImpassableSquares(enemy_factories, distance_to_enemy_factories);
 	multisourceBfsAvoidingOnlyImpassableSquares(friendly_factories, distance_to_friendly_factories);
+
+	multisourceBfsForSecondClosestAvoidingOnlyImpassableSquares(friendly_rangers, dist_to_second_friendly_ranger);
+	multisourceBfsForSecondClosestAvoidingOnlyImpassableSquares(friendly_healers, dist_to_second_friendly_healer);
 
 	// Calculate good ranger positions
 	// Don't include:
@@ -2815,6 +2839,10 @@ static void knightTryToAttack (Unit& unit) {
 }
 
 static void runHealer (Unit& unit) {
+	if (!unit.is_on_map()) {
+		return;
+	}
+
 	tryToHeal(unit);
 	bool doneMove = false;
 
@@ -2826,8 +2854,38 @@ static void runHealer (Unit& unit) {
 	int myY = loc.get_y(), myX = loc.get_x();
 
 	if (!doneMove && is_good_healer_position[myY][myX]) {
+		// we want to be close to the enemy, but once we get closer than 98, we don't care how close
+		// and we want to be far from other healers
+		// we compare to our current location, if there's no better place then don't bother moving
+		int bestMove = DirCenterIndex;
+
+		if (gc.is_move_ready(unit.get_id())) {
+			int bestAttackDist = std::max(attackDistanceToEnemy[myY][myX], 98);
+			int bestDistFromOtherHealers = dist_to_second_friendly_healer[myY][myX];
+			for (int d = 0; d < 8; d++) {
+				if (gc.can_move(unit.get_id(), directions[d])) {
+					MapLocation loc = unit.get_map_location().add(directions[d]);
+					int attackDist = std::max(attackDistanceToEnemy[loc.get_y()][loc.get_x()], 98);
+					int distFromOtherHealers = dist_to_second_friendly_healer[loc.get_y()][loc.get_x()];
+					if (is_good_healer_position[loc.get_y()][loc.get_x()] &&
+						(attackDist < bestAttackDist || (attackDist == bestAttackDist && distFromOtherHealers > bestDistFromOtherHealers))) {
+						bestMove = d;
+						bestAttackDist = attackDist;
+						bestDistFromOtherHealers = distFromOtherHealers;
+					}
+				}
+			}
+		}
+		
+		if (bestMove != DirCenterIndex) {
+			doMoveRobot(unit, directions[bestMove]);
+			MapLocation loc = unit.get_map_location().add(directions[bestMove]);
+			is_good_healer_position_taken[loc.get_y()][loc.get_x()] = true;
+		} else {
+			is_good_healer_position_taken[myY][myX] = true;
+		}
+		// set done move to true whether we decided to move or not
 		doneMove = true;
-		is_good_healer_position_taken[myY][myX] = true;
 	}
 
 	if (!doneMove) {
@@ -3710,6 +3768,55 @@ static void multisourceBfsAvoidingOnlyImpassableSquares (vector<SimpleState>& st
 				//if (!hasFriendlyUnit[ny][nx])
 
 				q.push(SimpleState(ny, nx));
+			}
+		}
+	}
+}
+
+static void multisourceBfsForSecondClosestAvoidingOnlyImpassableSquares (vector<SimpleState>& startingLocs, int resultArr[55][55]) {
+	// copied from multisourceBfsAvoidingOnlyImpassableSquares
+	// but this function gets the second shortest distance.
+	// This is useful, for example if you want your healers to spread out from other healers.
+	// Simply check if any empty adjacent good healer position has a larger 2nd shortest distance
+	// to a healer than your current position. (The shortest distance will be your own at distance 1.)
+
+	// index of the closest and second closest starting loc to each location
+	// or -1 if not found.
+	static int closestStartingLoc[55][55];
+	static int secondClosestStartingLoc[55][55];
+
+	for (int y = 0; y < height; y++) for (int x = 0; x < width; x++) {
+		resultArr[y][x] = MultisourceBfsUnreachableMax;
+		closestStartingLoc[y][x] = secondClosestStartingLoc[y][x] = -1;
+	}
+	// tuple of y, x, distance, and which starting location it's from
+	queue<std::tuple<int,int,int,int>> q;
+
+	for (int i = 0; i < startingLocs.size(); i++) {
+		SimpleState loc = startingLocs[i];
+		closestStartingLoc[loc.y][loc.x] = i;
+		q.emplace(loc.y, loc.x, 0, i);
+	}
+
+	while (!q.empty()) {
+		int y, x, dist, whichStartingLoc;
+		std::tie(y, x, dist, whichStartingLoc) = q.front();
+		q.pop();
+
+		for (int d = 0; d < 8; d++) {
+			int ny = y + dy[d];
+			int nx = x + dx[d];
+			if (0 <= ny && ny < height && 0 <= nx && nx < width &&
+					isPassable[ny][nx]) {
+				if (closestStartingLoc[ny][nx] == -1) {
+					closestStartingLoc[ny][nx] = whichStartingLoc;
+					q.emplace(ny, nx, dist + 1, whichStartingLoc);
+				} else if (closestStartingLoc[ny][nx] != whichStartingLoc &&
+						secondClosestStartingLoc[ny][nx] == -1) {
+					secondClosestStartingLoc[ny][nx] = whichStartingLoc;
+					resultArr[ny][nx] = dist + 1;
+					q.emplace(ny, nx, dist + 1, whichStartingLoc);
+				}
 			}
 		}
 	}
